@@ -6,3 +6,4 @@ edition = "2021"
 [dependencies]
 anyhow = "1.0.98"
 plonky2 = "1.1.0"
+rand = "0.9.1"

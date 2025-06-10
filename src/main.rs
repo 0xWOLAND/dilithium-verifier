@@ -1,43 +1,89 @@
 use anyhow::Result;
 use plonky2::field::types::Field;
-use plonky2::hash::poseidon::Poseidon;
-use plonky2::iop::witness::{PartialWitness, WitnessWrite};
 use plonky2::plonk::circuit_builder::CircuitBuilder;
 use plonky2::plonk::circuit_data::CircuitConfig;
 use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
+use plonky2::iop::witness::{PartialWitness, WitnessWrite};
 
-/// An example of using Plonky2 to prove a statement of the form
-/// "I know n * (n + 1) * ... * (n + 99)".
-/// When n == 1, this is proving knowledge of 100!.
+use dilithium_verifier::polynomial::Polynomial;
+use dilithium_verifier::constants::{F, D, C};
+
+/// An example of using Plonky2 to prove polynomial multiplication.
+/// Given two polynomials represented by their coefficients,
+/// compute their product polynomial.
 fn main() -> Result<()> {
-    const D: usize = 2;
-    type C = PoseidonGoldilocksConfig;
-    type F = <C as GenericConfig<D>>::F;
+    // Create two example polynomials
+    // p1 = x^2 + 2x + 1
+    let p1 = Polynomial::new(vec![
+        F::from_noncanonical_biguint(F::order().into()) - F::ONE,             // constant term
+        F::from_noncanonical_biguint(F::order().into()) - F::ONE,             // coefficient of x
+        F::from_noncanonical_biguint(F::order().into()) - F::ONE,             // coefficient of x^2
+    ]);
 
+    // p2 = x^2 + 1
+    let p2 = Polynomial::new(vec![
+        F::ONE,             // constant term
+        F::ZERO,            // coefficient of x
+        F::ONE,             // coefficient of x^2
+    ]);
+
+    // Regular multiplication
+    let result = p1.clone() * p2.clone();
+    println!("Regular multiplication result:");
+    for (i, coeff) in result.coefficients().iter().enumerate() {
+        println!("x^{}: {}", i, coeff);
+    }
+
+    // Circuit building for multiplication
+    println!("\nBuilding circuit for multiplication...");
     let config = CircuitConfig::standard_recursion_config();
     let mut builder = CircuitBuilder::<F, D>::new(config);
+    
+    // Set the builder in thread local storage
+    Polynomial::set_builder(&mut builder);
 
-    // The arithmetic circuit.
-    let initial = builder.add_virtual_target();
-    let mut cur_target = initial;
-    for i in 2..101 {
-        let i_target = builder.constant(F::from_canonical_u32(i));
-        cur_target = builder.mul(cur_target, i_target);
-    }
-    // Public inputs are the initial value (provided below) and the result (which is generated).
-    builder.register_public_input(initial);
-    builder.register_public_input(cur_target);
+    // Create targets for polynomial multiplication in the circuit
+    let circuit_result = p1.clone() * p2.clone();
+    
+    // Clear the builder from thread local storage
+    Polynomial::clear_builder();
 
+    let circuit_data = builder.build::<C>();
+
+    // Generate a proof
+    println!("\nGenerating proof...");
     let mut pw = PartialWitness::new();
-    pw.set_target(initial, F::ONE)?;
 
-    let data = builder.build::<C>();
-    let proof = data.prove(pw)?;
+    // Set witness values for input polynomials
+    if let Some(targets) = p1.targets() {
+        for (i, &target) in targets.iter().enumerate() {
+            pw.set_target(target, p1.coefficients()[i])?;
+        }
+    }
 
-    println!(
-        "Factorial starting at {} is {}",
-        proof.public_inputs[0], proof.public_inputs[1]
-    );
+    if let Some(targets) = p2.targets() {
+        for (i, &target) in targets.iter().enumerate() {
+            pw.set_target(target, p2.coefficients()[i])?;
+        }
+    }
 
-    data.verify(proof)
+    // Set witness values for result polynomial
+    if let Some(targets) = circuit_result.targets() {
+        for (i, &target) in targets.iter().enumerate() {
+            pw.set_target(target, circuit_result.coefficients()[i])?;
+        }
+    }
+
+    let proof = circuit_data.prove(pw)?;
+
+    // Verify the proof
+    println!("Verifying proof...");
+    circuit_data.verify(proof)?;
+    println!("Proof verified successfully!");
+
+    println!("\nCircuit stats:");
+    println!("Number of public inputs: {}", circuit_data.common.num_public_inputs);
+    println!("Number of gates: {}", circuit_data.common.degree_bits());
+
+    Ok(())
 }
