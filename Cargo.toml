@@ -1,0 +1,8 @@
+[package]
+name = "dilithium-verifier"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1.0.98"
+plonky2 = "1.1.0"
