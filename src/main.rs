@@ -8,23 +8,20 @@ use plonky2::iop::witness::{PartialWitness, WitnessWrite};
 use dilithium_verifier::polynomial::Polynomial;
 use dilithium_verifier::constants::{F, D, C};
 
-/// An example of using Plonky2 to prove polynomial multiplication.
-/// Given two polynomials represented by their coefficients,
-/// compute their product polynomial.
 fn main() -> Result<()> {
     // Create two example polynomials
     // p1 = x^2 + 2x + 1
     let p1 = Polynomial::new(vec![
-        F::from_noncanonical_biguint(F::order().into()) - F::ONE,             // constant term
-        F::from_noncanonical_biguint(F::order().into()) - F::ONE,             // coefficient of x
-        F::from_noncanonical_biguint(F::order().into()) - F::ONE,             // coefficient of x^2
+        F::ONE,                     // constant term
+        F::TWO,           // coefficient of x (2)
+        F::ONE,                    // coefficient of x^2
     ]);
 
     // p2 = x^2 + 1
     let p2 = Polynomial::new(vec![
         F::ONE,             // constant term
-        F::ZERO,            // coefficient of x
-        F::ONE,             // coefficient of x^2
+        F::ZERO,           // coefficient of x
+        F::ONE,            // coefficient of x^2
     ]);
 
     // Regular multiplication
@@ -83,7 +80,8 @@ fn main() -> Result<()> {
 
     println!("\nCircuit stats:");
     println!("Number of public inputs: {}", circuit_data.common.num_public_inputs);
-    println!("Number of gates: {}", circuit_data.common.degree_bits());
+    println!("Gate instances: {:?}", circuit_data.common.gates);
+    println!("Circuit degree bits: {}", circuit_data.common.degree_bits());
 
     Ok(())
 }

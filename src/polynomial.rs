@@ -1,4 +1,4 @@
-use std::ops::{Add, Mul};
+use std::ops::{Add, Index, Mul};
 use plonky2::field::types::Field;
 use plonky2::field::extension::Extendable;
 use plonky2::hash::hash_types::RichField;
@@ -16,10 +16,40 @@ pub struct Polynomial {
 
 impl Polynomial {
     pub fn new(coeffs: Vec<F>) -> Self {
+        let coeffs: Vec<F> = coeffs.into_iter()
+            .rev()
+            .skip_while(|&c| c == F::ZERO)
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .collect();
+            
         Self { 
-            coeffs,
+            coeffs: if coeffs.is_empty() { vec![F::ZERO] } else { coeffs },
             targets: None,
         }
+    }
+
+    pub fn zero() -> Self {
+        Self {
+            coeffs: vec![F::ZERO],
+            targets: None,
+        }
+    }
+
+    pub fn is_zero(&self) -> bool {
+        self.coeffs.len() == 1 && self.coeffs[0] == F::ZERO
+    }
+
+    pub fn one() -> Self {
+        Self {
+            coeffs: vec![F::ONE],
+            targets: None,
+        }
+    }
+
+    pub fn is_one(&self) -> bool {
+        self.coeffs.len() == 1 && self.coeffs[0] == F::ONE
     }
 
     pub fn degree(&self) -> usize {
@@ -126,6 +156,29 @@ impl Mul for Polynomial {
     type Output = Self;
 
     fn mul(mut self, mut rhs: Self) -> Self::Output {
+        // Special cases for zero polynomials
+        if self.is_zero() || rhs.is_zero() {
+            let mut result = Self::zero();
+            
+            // If we have a builder, create circuit constraints for zero polynomial
+            if let Some(builder) = Self::get_builder() {
+                let poly1_targets = self.get_or_create_targets(builder);
+                let poly2_targets = rhs.get_or_create_targets(builder);
+                
+                // Create zero target and verify it's the product
+                let zero_target = builder.zero();
+                for i in 0..poly1_targets.len() {
+                    for j in 0..poly2_targets.len() {
+                        let prod = builder.mul(poly1_targets[i], poly2_targets[j]);
+                        builder.connect(prod, zero_target);
+                    }
+                }
+                result.targets = Some(vec![zero_target]);
+            }
+            
+            return result;
+        }
+
         let deg1 = self.degree();
         let deg2 = rhs.degree();
         let result_degree = deg1 + deg2;
@@ -139,7 +192,7 @@ impl Mul for Polynomial {
             }
         }
 
-        let mut result_targets = None;
+        let mut result = Self::new(result_coeffs);
         
         // If we have a builder, create circuit constraints
         if let Some(builder) = Self::get_builder() {
@@ -152,19 +205,70 @@ impl Mul for Polynomial {
             for i in 0..=deg1 {
                 for j in 0..=deg2 {
                     let prod = builder.mul(poly1_targets[i], poly2_targets[j]);
-                    println!("Adding mul gate for x^{} * x^{}", i, j);
                     targets[i + j] = builder.add(targets[i + j], prod);
-                    println!("Adding add gate for x^{} * x^{}", i, j);
                 }
             }
 
-            result_targets = Some(targets);
+            result.targets = Some(targets);
         }
 
-        Self {
-            coeffs: result_coeffs,
-            targets: result_targets,
-        }
+        result
     }
 }
 
+impl Index<usize> for Polynomial {
+    type Output = F;
+    
+    fn index(&self, index: usize) -> &Self::Output {
+        &self.coeffs[index]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_polynomial_addition() {
+        let p1 = Polynomial::new(vec![F::ONE, F::ONE, F::ONE]);
+        let p2 = Polynomial::new(vec![F::ONE, F::ONE, F::ONE]);
+        let result = p1 + p2;
+        assert_eq!(result.coeffs, vec![F::TWO, F::TWO, F::TWO]);
+    }
+
+    #[test]
+    fn test_polynomial_multiplication() {
+        let p1 = Polynomial::new(vec![F::ONE, F::ONE, F::ONE]);
+        let p2 = Polynomial::new(vec![F::ONE, F::ONE, F::ONE]);
+        let result = p1 * p2;
+        assert_eq!(result.coeffs, vec![F::ONE, F::TWO, F::ONE]);
+    }
+    
+    #[test]
+    fn test_polynomial_zero() {
+        let p = Polynomial::zero();
+        assert_eq!(p.coeffs, vec![F::ZERO]);
+
+        let p2 = Polynomial::new(vec![F::ZERO]);
+        let result = p.clone() + p2;
+        assert_eq!(result.coeffs, vec![F::ZERO]);
+
+        let p3 = Polynomial::new(vec![F::ONE, F::ONE, F::ONE]);
+        let result = p.clone() * p3;
+        assert_eq!(result.coeffs, vec![F::ZERO]);
+    }
+
+    #[test]
+    fn test_polynomial_one() {
+        let p = Polynomial::one();
+        assert_eq!(p.coeffs, vec![F::ONE]);
+
+        let p2 = Polynomial::new(vec![F::ONE, F::ONE, F::ONE]);
+        let result = p.clone() * p2;
+        assert_eq!(result.coeffs, vec![F::ONE, F::ONE, F::ONE]);
+
+        let p3 = Polynomial::new(vec![F::ONE, F::ONE, F::ONE]);
+        let result = p.clone() + p3;
+        assert_eq!(result.coeffs, vec![F::TWO, F::ONE, F::ONE]);
+    }
+}
