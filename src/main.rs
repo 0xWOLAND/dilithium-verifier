@@ -52,23 +52,17 @@ fn main() -> Result<()> {
     let mut pw = PartialWitness::new();
 
     // Set witness values for input polynomials
-    if let Some(targets) = p1.targets() {
-        for (i, &target) in targets.iter().enumerate() {
-            pw.set_target(target, p1.coefficients()[i])?;
-        }
+    for (i, &target) in p1.targets().iter().enumerate() {
+        pw.set_target(target, p1.coefficients()[i])?;
     }
 
-    if let Some(targets) = p2.targets() {
-        for (i, &target) in targets.iter().enumerate() {
-            pw.set_target(target, p2.coefficients()[i])?;
-        }
+    for (i, &target) in p2.targets().iter().enumerate() {
+        pw.set_target(target, p2.coefficients()[i])?;
     }
 
     // Set witness values for result polynomial
-    if let Some(targets) = circuit_result.targets() {
-        for (i, &target) in targets.iter().enumerate() {
-            pw.set_target(target, circuit_result.coefficients()[i])?;
-        }
+    for (i, &target) in circuit_result.targets().iter().enumerate() {
+        pw.set_target(target, circuit_result.coefficients()[i])?;
     }
 
     let proof = circuit_data.prove(pw)?;

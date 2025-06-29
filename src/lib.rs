@@ -7,4 +7,5 @@ thread_local! {
 }
 
 pub mod polynomial;
+pub mod module;
 pub mod constants;
