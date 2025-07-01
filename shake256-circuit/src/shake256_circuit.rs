@@ -29,6 +29,81 @@ impl<F: RichField + Extendable<D>, C: GenericConfig<D, F = F>, const D: usize>
 where
     C::Hasher: AlgebraicHasher<F>,
 {
+    /// Helper function to perform bitwise XOR (internal version)
+    fn bitwise_xor_internal(
+        builder: &mut CircuitBuilder<F, D>,
+        a: Target,
+        b: Target,
+    ) -> Target {
+        let a_bits = builder.split_le(a, 64);
+        let b_bits = builder.split_le(b, 64);
+        
+        let mut xor_bits = Vec::new();
+        for i in 0..64 {
+            let a_bit = a_bits[i].target;
+            let b_bit = b_bits[i].target;
+            let product = builder.mul(a_bit, b_bit);
+            let two_product = builder.mul_const(F::TWO, product);
+            let sum = builder.add(a_bit, b_bit);
+            let xor_bit = builder.sub(sum, two_product);
+            xor_bits.push(xor_bit);
+        }
+        
+        Self::target_sum_from_le_bits(builder, &xor_bits)
+    }
+
+    /// Helper function to shift left by a constant amount
+    fn shift_left_const(
+        builder: &mut CircuitBuilder<F, D>,
+        value: Target,
+        positions: usize,
+    ) -> Target {
+        if positions == 0 {
+            return value;
+        }
+        
+        if positions >= 64 {
+            return builder.zero();
+        }
+        
+        // Shift left by multiplying by 2^positions
+        let one = builder.one();
+        let multiplier = builder.exp_power_of_2(one, positions);
+        builder.mul(value, multiplier)
+    }
+
+    /// Helper function to extract byte from word at specific position
+    fn extract_byte(
+        builder: &mut CircuitBuilder<F, D>,
+        word: Target,
+        byte_position: usize,
+    ) -> Target {
+        if byte_position >= 8 {
+            return builder.zero();
+        }
+        
+        let bits = builder.split_le(word, 64);
+        let start_bit = byte_position * 8;
+        let end_bit = start_bit + 8;
+        
+        let byte_targets: Vec<Target> = bits[start_bit..end_bit].iter().map(|b| b.target).collect();
+        Self::target_sum_from_le_bits(builder, &byte_targets)
+    }
+
+    /// Helper function to sum Target bits as little-endian
+    fn target_sum_from_le_bits(builder: &mut CircuitBuilder<F, D>, bits: &[Target]) -> Target {
+        let mut result = builder.zero();
+        
+        for (i, &bit) in bits.iter().enumerate() {
+            let one = builder.one();
+            let power_of_two = builder.exp_power_of_2(one, i);
+            let term = builder.mul(bit, power_of_two);
+            result = builder.add(result, term);
+        }
+        
+        result
+    }
+
     /// Create a new SHAKE256 circuit
     /// 
     /// # Arguments
@@ -43,18 +118,28 @@ where
             .map(|_| builder.add_virtual_target())
             .collect();
         
-        // Create output targets (one per byte)  
-        let output_targets: Vec<Target> = (0..output_len)
-            .map(|_| builder.add_virtual_target())
-            .collect();
+        // Constrain input targets to be valid bytes (0-255)
+        for &input in &input_targets {
+            builder.range_check(input, 8);
+        }
         
-        // For this implementation, we'll compute SHAKE256 constraints separately 
-        // and use witness generation to set the correct values
-        // The actual SHAKE256 computation will be verified through witness generation
+        // Build the actual SHAKE256 circuit and get computed output targets
+        let computed_outputs = Self::build_shake256_circuit(
+            &mut builder,
+            &input_targets,
+            &[],  // We don't need separate output targets since we compute them
+            input_len,
+            output_len,
+        );
         
-        // Add dummy constraints to ensure circuit is non-trivial
-        for i in 0..std::cmp::min(input_len, output_len) {
-            let _dummy = builder.add(input_targets[i], output_targets[i]);
+        // Constrain computed outputs to be valid bytes (0-255)
+        for &output in &computed_outputs {
+            builder.range_check(output, 8);
+        }
+        
+        // Register computed output targets as public inputs so they can be extracted from proofs
+        for &target in &computed_outputs {
+            builder.register_public_input(target);
         }
         
         let circuit = builder.build::<C>();
@@ -62,7 +147,7 @@ where
         Self {
             circuit,
             input_targets,
-            output_targets,
+            output_targets: computed_outputs,
             input_len,
             output_len,
         }
@@ -98,19 +183,21 @@ where
         while offset < input_len {
             let chunk_size = std::cmp::min(RATE_BYTES, input_len - offset);
             
-            // XOR input chunk into state
+            // XOR input chunk into state (proper byte packing)
             for i in 0..chunk_size {
                 if offset + i < input_targets.len() {
-                    let byte_pos = i / 8;
-                    let bit_pos = i % 8;
+                    let word_idx = i / 8;
+                    let byte_in_word = i % 8;
                     
-                    // Simple approximation: add byte values to state words
-                    if byte_pos < STATE_WORDS {
-                        let scaled_byte = builder.mul_const(
-                            F::from_canonical_u64(1u64 << (bit_pos * 8)),
-                            input_targets[offset + i]
+                    if word_idx < STATE_WORDS {
+                        // Pack byte into correct position in 64-bit word
+                        let shift_amount = byte_in_word * 8;
+                        let shifted_byte = Self::shift_left_const(
+                            builder,
+                            input_targets[offset + i],
+                            shift_amount
                         );
-                        state[byte_pos] = builder.add(state[byte_pos], scaled_byte);
+                        state[word_idx] = Self::bitwise_xor_internal(builder, state[word_idx], shifted_byte);
                     }
                 }
             }
@@ -121,10 +208,30 @@ where
             offset += chunk_size;
         }
         
-        // Add padding for SHAKE256 (domain separation)
-        // SHAKE256 uses pad10*1 with domain separation bits 1111
-        let padding_byte = builder.constant(F::from_canonical_u64(0x1F)); // Domain separation
-        state[0] = builder.add(state[0], padding_byte);
+        // Add proper SHAKE256 padding (pad10*1 with domain separation)
+        // First add domain separation suffix 1111 (0x1F for SHAKE256)
+        let padding_offset = input_len % RATE_BYTES;
+        
+        // Add padding byte at correct position
+        if padding_offset < RATE_BYTES {
+            let word_idx = padding_offset / 8;
+            let byte_in_word = padding_offset % 8;
+            
+            if word_idx < STATE_WORDS {
+                let padding_byte = builder.constant(F::from_canonical_u64(0x1F)); // Domain separation
+                let shifted_padding = Self::shift_left_const(builder, padding_byte, byte_in_word * 8);
+                state[word_idx] = Self::bitwise_xor_internal(builder, state[word_idx], shifted_padding);
+            }
+        }
+        
+        // Add final padding bit at end of rate (pad10*1 pattern)
+        let final_byte_word = (RATE_BYTES - 1) / 8;
+        let final_byte_pos = (RATE_BYTES - 1) % 8;
+        if final_byte_word < STATE_WORDS {
+            let final_bit = builder.constant(F::from_canonical_u64(0x80)); // High bit
+            let shifted_final = Self::shift_left_const(builder, final_bit, final_byte_pos * 8);
+            state[final_byte_word] = Self::bitwise_xor_internal(builder, state[final_byte_word], shifted_final);
+        }
         
         // Apply final permutation
         state = KeccakCircuit::keccak_f(builder, &state);
@@ -134,19 +241,15 @@ where
         let mut squeezed = 0;
         
         while squeezed < output_len {
-            // Extract bytes from current state
+            // Extract bytes from current state (proper byte extraction)
             for word_idx in 0..STATE_WORDS {
                 for byte_in_word in 0..8 {
                     if squeezed >= output_len {
                         break;
                     }
                     
-                    // Extract byte from word (simplified approximation)
-                    // In a real implementation, this would use proper bit manipulation
-                    let word_val = state[word_idx];
-                    let byte_mask = builder.constant(F::from_canonical_u64(255));
-                    let extracted_byte = builder.mul(word_val, byte_mask); // Simplified extraction
-                    
+                    // Extract byte from word using proper bit manipulation
+                    let extracted_byte = Self::extract_byte(builder, state[word_idx], byte_in_word);
                     output.push(extracted_byte);
                     squeezed += 1;
                     
@@ -183,7 +286,7 @@ where
         
         let mut pw = PartialWitness::new();
         
-        // Set input targets
+        // Set input targets - the circuit will compute SHAKE256 from these inputs
         for i in 0..self.input_len {
             let val = if i < input_bytes.len() { 
                 input_bytes[i] 
@@ -193,18 +296,8 @@ where
             pw.set_target(self.input_targets[i], F::from_canonical_u64(val as u64));
         }
         
-        // Compute reference SHAKE256 output
-        let reference_output = Self::reference_shake256(input_bytes, self.output_len);
-        
-        // Set output targets to reference values
-        for i in 0..self.output_len {
-            let val = if i < reference_output.len() {
-                reference_output[i]
-            } else {
-                0
-            };
-            pw.set_target(self.output_targets[i], F::from_canonical_u64(val as u64));
-        }
+        // The circuit computes the SHAKE256 output from the inputs automatically
+        // No need to set output targets - they are computed by the circuit
         
         self.circuit.prove(pw)
     }
@@ -216,23 +309,46 @@ where
     /// 
     /// # Returns
     /// * `Result<Vec<u8>>` - Extracted hash output bytes
-    pub fn extract_output(&self, _proof: &ProofWithPublicInputs<F, C, D>) -> Result<Vec<u8>> {
-        // For this simplified implementation, we extract from the circuit's output targets
-        // In a full implementation, this would extract from the proof's public inputs
+    pub fn extract_output(&self, proof: &ProofWithPublicInputs<F, C, D>) -> Result<Vec<u8>> {
+        // Extract the actual computed output values from the proof's public inputs
+        // The output targets were registered as public inputs during circuit construction
         
-        // Since our circuit sets the output targets to the reference SHAKE256 values,
-        // we can return those values. In practice, you'd extract from proof.public_inputs
+        if proof.public_inputs.len() < self.output_len {
+            return Err(anyhow::anyhow!(
+                "Proof does not contain enough public inputs: {} < {}", 
+                proof.public_inputs.len(), 
+                self.output_len
+            ));
+        }
+        
         let mut output = Vec::new();
         
-        // This is a placeholder - in reality we'd need to extract the values from the proof
-        // For now, we'll indicate success by returning the correct length
-        output.resize(self.output_len, 0);
+        // Extract each output byte from the public inputs
+        // The output targets are the first self.output_len public inputs
+        for i in 0..self.output_len {
+            let field_element = proof.public_inputs[i];
+            
+            // Convert field element to u64, then to u8
+            // Note: This assumes the field element represents a valid byte value (0-255)
+            let value_u64 = field_element.to_canonical_u64();
+            
+            if value_u64 > 255 {
+                return Err(anyhow::anyhow!(
+                    "Invalid byte value in proof public inputs at index {}: {} > 255", 
+                    i, 
+                    value_u64
+                ));
+            }
+            
+            output.push(value_u64 as u8);
+        }
         
         Ok(output)
     }
     
-    /// Compute SHAKE256 hash using reference implementation (for testing/comparison)
-    pub fn reference_shake256(input: &[u8], output_len: usize) -> Vec<u8> {
+    /// Compute SHAKE256 hash using reference implementation (for testing/comparison only)
+    #[cfg(test)]
+    fn reference_shake256(input: &[u8], output_len: usize) -> Vec<u8> {
         use sha3::{Shake256, digest::{Update, ExtendableOutput, XofReader}};
         
         let mut hasher = Shake256::default();

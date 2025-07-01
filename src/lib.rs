@@ -9,6 +9,9 @@ pub mod mldsa_trait;
 #[cfg(test)]
 pub mod verification_test;
 
+#[cfg(test)]
+pub mod constraint_test;
+
 pub use mldsa_verifier::MLDSAVerifier;
 pub use mldsa_sig::MLDSASigner;
 pub use mldsa_trait::{MLDSAVariant, MLDSA44, MLDSA65, MLDSA87};

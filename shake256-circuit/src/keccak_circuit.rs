@@ -2,7 +2,7 @@ use plonky2::field::extension::Extendable;
 use plonky2::hash::hash_types::RichField;
 use plonky2::iop::target::Target;
 use plonky2::plonk::circuit_builder::CircuitBuilder;
-use plonky2::plonk::config::{AlgebraicHasher, GenericConfig};
+use std::sync::Arc;
 
 /// Keccak-f[1600] permutation circuit implementation
 /// 
@@ -12,6 +12,230 @@ use plonky2::plonk::config::{AlgebraicHasher, GenericConfig};
 pub struct KeccakCircuit;
 
 impl KeccakCircuit {
+    /// Create 8-bit XOR lookup table (returns Arc<Vec<(u16, u16)>>)
+    fn create_xor_8bit_table() -> Arc<Vec<(u16, u16)>> {
+        let mut table = Vec::new();
+        for a in 0..256u16 {
+            for b in 0..256u16 {
+                let key = (a << 8) | b;
+                let value = (a ^ b) as u16;
+                table.push((key, value));
+            }
+        }
+        Arc::new(table)
+    }
+
+    /// Create 8-bit AND lookup table (returns Arc<Vec<(u16, u16)>>)
+    fn create_and_8bit_table() -> Arc<Vec<(u16, u16)>> {
+        let mut table = Vec::new();
+        for a in 0..256u16 {
+            for b in 0..256u16 {
+                let key = (a << 8) | b;
+                let value = (a & b) as u16;
+                table.push((key, value));
+            }
+        }
+        Arc::new(table)
+    }
+
+    /// Create 8-bit NOT lookup table (returns Arc<Vec<(u16, u16)>>)
+    fn create_not_8bit_table() -> Arc<Vec<(u16, u16)>> {
+        let table: Vec<(u16, u16)> = (0..256u16).map(|x| (x, (!x as u8) as u16)).collect();
+        Arc::new(table)
+    }
+
+    /// Efficient 8-bit XOR using lookup table
+    fn xor_8bit_lookup<F: RichField + Extendable<D>, const D: usize>(
+        builder: &mut CircuitBuilder<F, D>,
+        a: Target,
+        b: Target,
+        xor_table_id: usize,
+    ) -> Target {
+        // Create key: (a << 8) | b
+        let one = builder.one();
+        let key_shift = builder.exp_power_of_2(one, 8);
+        let shifted_a = builder.mul(a, key_shift);
+        let key = builder.add(shifted_a, b);
+        
+        // Lookup XOR result
+        builder.add_lookup_from_index(key, xor_table_id)
+    }
+
+    /// Efficient 8-bit AND using lookup table
+    fn and_8bit_lookup<F: RichField + Extendable<D>, const D: usize>(
+        builder: &mut CircuitBuilder<F, D>,
+        a: Target,
+        b: Target,
+        and_table_id: usize,
+    ) -> Target {
+        // Create key: (a << 8) | b
+        let one = builder.one();
+        let key_shift = builder.exp_power_of_2(one, 8);
+        let shifted_a = builder.mul(a, key_shift);
+        let key = builder.add(shifted_a, b);
+        
+        // Lookup AND result
+        builder.add_lookup_from_index(key, and_table_id)
+    }
+
+    /// Efficient 8-bit NOT using lookup table
+    fn not_8bit_lookup<F: RichField + Extendable<D>, const D: usize>(
+        builder: &mut CircuitBuilder<F, D>,
+        value: Target,
+        not_table_id: usize,
+    ) -> Target {
+        builder.add_lookup_from_index(value, not_table_id)
+    }
+
+    /// Helper function to perform bitwise XOR on 64-bit values using 8-bit lookup tables
+    fn bitwise_xor<F: RichField + Extendable<D>, const D: usize>(
+        builder: &mut CircuitBuilder<F, D>,
+        a: Target,
+        b: Target,
+    ) -> Target {
+        // Split 64-bit values into 8-bit chunks (8 bytes each)
+        let a_bytes = Self::split_into_bytes(builder, a);
+        let b_bytes = Self::split_into_bytes(builder, b);
+        
+        // Create XOR lookup table once (in practice, this would be cached)
+        let xor_table = Self::create_xor_8bit_table();
+        let xor_table_id = builder.add_lookup_table_from_pairs(xor_table);
+        
+        // XOR each byte pair using lookup table
+        let mut result_bytes = Vec::new();
+        for i in 0..8 {
+            let xor_byte = Self::xor_8bit_lookup(builder, a_bytes[i], b_bytes[i], xor_table_id);
+            result_bytes.push(xor_byte);
+        }
+        
+        // Reconstruct 64-bit value from bytes
+        Self::reconstruct_from_bytes(builder, &result_bytes)
+    }
+
+    /// Split a 64-bit target into 8 byte targets
+    fn split_into_bytes<F: RichField + Extendable<D>, const D: usize>(
+        builder: &mut CircuitBuilder<F, D>,
+        value: Target,
+    ) -> Vec<Target> {
+        let bits = builder.split_le(value, 64);
+        let mut bytes = Vec::new();
+        
+        for i in 0..8 {
+            let start_bit = i * 8;
+            let end_bit = start_bit + 8;
+            let byte_bits: Vec<Target> = bits[start_bit..end_bit].iter().map(|b| b.target).collect();
+            let byte_value = Self::target_sum_from_le_bits(builder, &byte_bits);
+            bytes.push(byte_value);
+        }
+        
+        bytes
+    }
+
+    /// Reconstruct a 64-bit value from 8 byte targets
+    fn reconstruct_from_bytes<F: RichField + Extendable<D>, const D: usize>(
+        builder: &mut CircuitBuilder<F, D>,
+        bytes: &[Target],
+    ) -> Target {
+        let mut result = builder.zero();
+        let one = builder.one();
+        
+        for (i, &byte) in bytes.iter().enumerate() {
+            let multiplier = builder.exp_power_of_2(one, i * 8);
+            let term = builder.mul(byte, multiplier);
+            result = builder.add(result, term);
+        }
+        
+        result
+    }
+
+    /// Helper function to perform bitwise rotation left
+    fn rotate_left<F: RichField + Extendable<D>, const D: usize>(
+        builder: &mut CircuitBuilder<F, D>,
+        value: Target,
+        positions: u32,
+    ) -> Target {
+        if positions == 0 {
+            return value;
+        }
+        
+        let bits = builder.split_le(value, 64);
+        let pos = (positions % 64) as usize;
+        
+        // Rotate bits: bits[pos..] + bits[..pos]
+        let mut rotated_bits = Vec::new();
+        for i in 0..64 {
+            let src_idx = (i + 64 - pos) % 64;
+            rotated_bits.push(bits[src_idx].target);
+        }
+        
+        Self::target_sum_from_le_bits(builder, &rotated_bits)
+    }
+
+    /// Helper function to perform bitwise NOT using 8-bit lookup tables
+    fn bitwise_not<F: RichField + Extendable<D>, const D: usize>(
+        builder: &mut CircuitBuilder<F, D>,
+        value: Target,
+    ) -> Target {
+        // Split 64-bit value into 8-bit chunks
+        let value_bytes = Self::split_into_bytes(builder, value);
+        
+        // Create NOT lookup table
+        let not_table = Self::create_not_8bit_table();
+        let not_table_id = builder.add_lookup_table_from_pairs(not_table);
+        
+        // NOT each byte using lookup table
+        let mut result_bytes = Vec::new();
+        for i in 0..8 {
+            let not_byte = Self::not_8bit_lookup(builder, value_bytes[i], not_table_id);
+            result_bytes.push(not_byte);
+        }
+        
+        // Reconstruct 64-bit value from bytes
+        Self::reconstruct_from_bytes(builder, &result_bytes)
+    }
+
+    /// Helper function to perform bitwise AND using 8-bit lookup tables
+    fn bitwise_and<F: RichField + Extendable<D>, const D: usize>(
+        builder: &mut CircuitBuilder<F, D>,
+        a: Target,
+        b: Target,
+    ) -> Target {
+        // Split 64-bit values into 8-bit chunks
+        let a_bytes = Self::split_into_bytes(builder, a);
+        let b_bytes = Self::split_into_bytes(builder, b);
+        
+        // Create AND lookup table
+        let and_table = Self::create_and_8bit_table();
+        let and_table_id = builder.add_lookup_table_from_pairs(and_table);
+        
+        // AND each byte pair using lookup table
+        let mut result_bytes = Vec::new();
+        for i in 0..8 {
+            let and_byte = Self::and_8bit_lookup(builder, a_bytes[i], b_bytes[i], and_table_id);
+            result_bytes.push(and_byte);
+        }
+        
+        // Reconstruct 64-bit value from bytes
+        Self::reconstruct_from_bytes(builder, &result_bytes)
+    }
+
+    /// Helper function to sum Target bits as little-endian
+    fn target_sum_from_le_bits<F: RichField + Extendable<D>, const D: usize>(
+        builder: &mut CircuitBuilder<F, D>,
+        bits: &[Target],
+    ) -> Target {
+        let mut result = builder.zero();
+        
+        for (i, &bit) in bits.iter().enumerate() {
+            let one = builder.one();
+            let power_of_two = builder.exp_power_of_2(one, i);
+            let term = builder.mul(bit, power_of_two);
+            result = builder.add(result, term);
+        }
+        
+        result
+    }
+
     /// Keccak round constants for the 24 rounds
     const ROUND_CONSTANTS: [u64; 24] = [
         0x0000000000000001, 0x0000000000008082, 0x800000000000808A, 0x8000000080008000,
@@ -86,7 +310,7 @@ impl KeccakCircuit {
         for x in 0..5 {
             c[x] = state[x];
             for y in 1..5 {
-                c[x] = builder.add(c[x], state[y * 5 + x]); // XOR approximated as addition mod p
+                c[x] = Self::bitwise_xor(builder, c[x], state[y * 5 + x]);
             }
         }
         
@@ -95,9 +319,8 @@ impl KeccakCircuit {
         for x in 0..5 {
             let c_prev = c[(x + 4) % 5];
             let c_next = c[(x + 1) % 5];
-            // Simplified rotation - in a full implementation, this would be proper bit rotation
-            let rotated = builder.mul_const(F::from_canonical_u64(2), c_next); // Approximate ROT(x, 1)
-            d[x] = builder.add(c_prev, rotated);
+            let rotated = Self::rotate_left(builder, c_next, 1);
+            d[x] = Self::bitwise_xor(builder, c_prev, rotated);
         }
         
         // Apply theta: A[x,y] = A[x,y] ⊕ D[x]
@@ -105,7 +328,7 @@ impl KeccakCircuit {
         for y in 0..5 {
             for x in 0..5 {
                 let idx = y * 5 + x;
-                result[idx] = builder.add(state[idx], d[x]);
+                result[idx] = Self::bitwise_xor(builder, state[idx], d[x]);
             }
         }
         
@@ -121,14 +344,7 @@ impl KeccakCircuit {
         
         for i in 0..25 {
             let offset = Self::RHO_OFFSETS[i];
-            // Simplified rotation - multiply by power of 2 for left rotation approximation
-            if offset == 0 {
-                result[i] = state[i];
-            } else {
-                // Approximate rotation with scaling (not cryptographically correct)
-                let scale = F::from_canonical_u64(1u64.wrapping_shl(offset % 64));
-                result[i] = builder.mul_const(scale, state[i]);
-            }
+            result[i] = Self::rotate_left(builder, state[i], offset);
         }
         
         result
@@ -164,11 +380,9 @@ impl KeccakCircuit {
                 let next2_idx = y * 5 + next2_x;
                 
                 // A[x,y] = A[x,y] ⊕ ((¬A[x+1,y]) ∧ A[x+2,y])
-                // Simplified: A[x,y] = A[x,y] + (1 - A[x+1,y]) * A[x+2,y]
-                let one = builder.one();
-                let not_next = builder.sub(one, state[next_idx]);
-                let and_term = builder.mul(not_next, state[next2_idx]);
-                result[idx] = builder.add(state[idx], and_term);
+                let not_next = Self::bitwise_not(builder, state[next_idx]);
+                let and_term = Self::bitwise_and(builder, not_next, state[next2_idx]);
+                result[idx] = Self::bitwise_xor(builder, state[idx], and_term);
             }
         }
         
@@ -183,9 +397,9 @@ impl KeccakCircuit {
     ) -> [Target; 25] {
         let mut result = *state;
         
-        // Add round constant to A[0,0]
-        let round_constant = F::from_canonical_u64(Self::ROUND_CONSTANTS[round]);
-        result[0] = builder.add_const(result[0], round_constant);
+        // XOR round constant with A[0,0]
+        let round_constant_target = builder.constant(F::from_canonical_u64(Self::ROUND_CONSTANTS[round]));
+        result[0] = Self::bitwise_xor(builder, result[0], round_constant_target);
         
         result
     }
