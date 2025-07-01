@@ -1,11 +1,17 @@
-use std::cell::RefCell;
-use plonky2::plonk::circuit_builder::CircuitBuilder;
-use crate::constants::{F, D};
-
-thread_local! {
-    pub static CURRENT_BUILDER: RefCell<Option<*mut CircuitBuilder<F, D>>> = RefCell::new(None);
-}
-
-pub mod polynomial;
-pub mod module;
 pub mod constants;
+pub mod types;
+pub mod ntt;
+pub mod hash;
+pub mod mldsa_verifier;
+pub mod mldsa_sig;
+pub mod mldsa_trait;
+
+#[cfg(test)]
+pub mod verification_test;
+
+#[cfg(test)]
+pub mod constraint_test;
+
+pub use mldsa_verifier::MLDSAVerifier;
+pub use mldsa_sig::MLDSASigner;
+pub use mldsa_trait::{MLDSAVariant, MLDSA44, MLDSA65, MLDSA87};

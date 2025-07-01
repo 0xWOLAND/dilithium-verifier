@@ -1,81 +1,24 @@
-use anyhow::Result;
-use plonky2::field::types::Field;
-use plonky2::plonk::circuit_builder::CircuitBuilder;
-use plonky2::plonk::circuit_data::CircuitConfig;
-use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
-use plonky2::iop::witness::{PartialWitness, WitnessWrite};
+use mldsa_verifier::{MLDSAVariant, MLDSA44, MLDSA65, MLDSA87};
 
-use dilithium_verifier::polynomial::Polynomial;
-use dilithium_verifier::constants::{F, D, C};
-
-fn main() -> Result<()> {
-    // Create two example polynomials
-    // p1 = x^2 + 2x + 1
-    let p1 = Polynomial::new(vec![
-        F::ONE,                     // constant term
-        F::TWO,           // coefficient of x (2)
-        F::ONE,                    // coefficient of x^2
-    ]);
-
-    // p2 = x^2 + 1
-    let p2 = Polynomial::new(vec![
-        F::ONE,             // constant term
-        F::ZERO,           // coefficient of x
-        F::ONE,            // coefficient of x^2
-    ]);
-
-    // Regular multiplication
-    let result = p1.clone() * p2.clone();
-    println!("Regular multiplication result:");
-    for (i, coeff) in result.coefficients().iter().enumerate() {
-        println!("x^{}: {}", i, coeff);
+fn test_variant<V: MLDSAVariant>(variant: V, name: &str) -> anyhow::Result<()> {
+    let (pk, sk) = variant.generate_keypair();
+    let message = b"test";
+    let signed_message = variant.sign_message(&sk, message)?;
+    let verified_message = variant.verify_signature(&pk, &signed_message)?;
+    if message == verified_message.as_slice() {
+        println!("{}: ok", name);
+        Ok(())
+    } else {
+        Err(anyhow::anyhow!("Verification failed for {}", name))
     }
+}
 
-    // Circuit building for multiplication
-    println!("\nBuilding circuit for multiplication...");
-    let config = CircuitConfig::standard_recursion_config();
-    let mut builder = CircuitBuilder::<F, D>::new(config);
-    
-    // Set the builder in thread local storage
-    Polynomial::set_builder(&mut builder);
-
-    // Create targets for polynomial multiplication in the circuit
-    let circuit_result = p1.clone() * p2.clone();
-    
-    // Clear the builder from thread local storage
-    Polynomial::clear_builder();
-
-    let circuit_data = builder.build::<C>();
-
-    // Generate a proof
-    println!("\nGenerating proof...");
-    let mut pw = PartialWitness::new();
-
-    // Set witness values for input polynomials
-    for (i, &target) in p1.targets().iter().enumerate() {
-        pw.set_target(target, p1.coefficients()[i])?;
-    }
-
-    for (i, &target) in p2.targets().iter().enumerate() {
-        pw.set_target(target, p2.coefficients()[i])?;
-    }
-
-    // Set witness values for result polynomial
-    for (i, &target) in circuit_result.targets().iter().enumerate() {
-        pw.set_target(target, circuit_result.coefficients()[i])?;
-    }
-
-    let proof = circuit_data.prove(pw)?;
-
-    // Verify the proof
-    println!("Verifying proof...");
-    circuit_data.verify(proof)?;
-    println!("Proof verified successfully!");
-
-    println!("\nCircuit stats:");
-    println!("Number of public inputs: {}", circuit_data.common.num_public_inputs);
-    println!("Gate instances: {:?}", circuit_data.common.gates);
-    println!("Circuit degree bits: {}", circuit_data.common.degree_bits());
-
+fn main() -> anyhow::Result<()> {
+    println!("Testing ML-DSA-44");
+    test_variant(MLDSA44, "ML-DSA-44")?;
+    println!("Testing ML-DSA-65");
+    test_variant(MLDSA65, "ML-DSA-65")?;
+    println!("Testing ML-DSA-87");
+    test_variant(MLDSA87, "ML-DSA-87")?;
     Ok(())
 }
