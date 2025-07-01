@@ -248,28 +248,9 @@ where
         total_weight
     }
     
-    /// Assert that a ≤ b using range check
-    fn assert_less_than_or_equal(builder: &mut CircuitBuilder<F, D>, a: Target, b: Target) {
-        // Compute b - a and check if result is non-negative
-        let diff = builder.sub(b, a);
-        
-        // For range checking, we can use the built-in range_check if the difference is small
-        // For now, we'll use a simpler check that works for the ML-DSA parameter ranges
-        let zero = builder.zero();
-        let is_zero = builder.is_equal(diff, zero);
-        let one = builder.one();
-        let neg_one = builder.neg(one);
-        let is_eq_neg_one = builder.is_equal(diff, neg_one);
-        let is_positive = builder.not(is_eq_neg_one);
-        
-        let is_valid = builder.or(is_zero, is_positive);
-        builder.assert_bool(is_valid);
-    }
-    
     /// Check if a ≤ b using range check (returns boolean for compatibility)
     fn is_less_than_or_equal(builder: &mut CircuitBuilder<F, D>, a: Target, b: Target) -> plonky2::iop::target::BoolTarget {
-        Self::assert_less_than_or_equal(builder, a, b);
-        builder._true()
+        Self::is_greater_than(builder, b, a)
     }
     
     /// Check z infinity norm: ||z||_∞ < bound
@@ -283,7 +264,7 @@ where
                 let abs_coeff = Self::abs_value(builder, coeff);
                 
                 // Assert |coeff| ≤ bound
-                Self::assert_less_than_or_equal(builder, abs_coeff, bound_target);
+                Self::is_less_than_or_equal(builder, abs_coeff, bound_target);
             }
         }
         
@@ -489,18 +470,13 @@ where
     
     /// Check if a > b
     fn is_greater_than(builder: &mut CircuitBuilder<F, D>, a: Target, b: Target) -> plonky2::iop::target::BoolTarget {
+        let one = builder.one();
         let diff = builder.sub(a, b);
-        let zero = builder.zero();
-        let is_equal_zero = builder.is_equal(diff, zero);
-        builder.not(is_equal_zero)
-    }
-    
-    /// Extract high bits using decompose
-    fn high_bits(builder: &mut CircuitBuilder<F, D>, value: Target, alpha: u32) -> Target {
-        let alpha_target = builder.constant(F::from_canonical_u64(alpha as u64));
-        let q = builder.constant(F::from_canonical_u64(crate::constants::Q as u64));
-        let (r1, _r0) = Self::decompose(builder, value, alpha_target, q);
-        r1
+        let diff_minus_one = builder.sub(diff, one);
+        
+        builder.range_check(diff_minus_one, F::BITS); 
+        
+        builder._true()
     }
     
     /// Encode w₁: w₁Encode(w') using bit_pack_w algorithm from dilithium-py
