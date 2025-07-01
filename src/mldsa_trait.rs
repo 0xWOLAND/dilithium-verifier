@@ -1,6 +1,6 @@
 use anyhow::Result;
 use pqcrypto_traits::sign::{PublicKey, SecretKey, SignedMessage};
-use crate::complete_verifier::CompleteMLDSAVerifierCircuit;
+use crate::mldsa_verifier::{MLDSAVerifier, mldsa44_params, mldsa65_params, mldsa87_params};
 use plonky2::plonk::config::PoseidonGoldilocksConfig;
 use plonky2::plonk::circuit_data::CircuitConfig;
 
@@ -74,12 +74,8 @@ impl MLDSAVariant for MLDSA44 {
         type C = PoseidonGoldilocksConfig;
         type F = <C as plonky2::plonk::config::GenericConfig<2>>::F;
         // ML-DSA-44 parameters: eta=2, gamma_1=2^17, gamma_2=(q-1)/88, tau=39, omega=80
-        let eta = 2;
-        let gamma_1 = 1 << 17;
-        let gamma_2 = (crate::constants::Q - 1) / 88;
-        let tau = 39;
-        let omega = 80;
-        let verifier = CompleteMLDSAVerifierCircuit::<F, C, 2>::new(config, self.k(), self.l(), eta, gamma_1, gamma_2, tau, omega);
+        let (k, l, d, eta, tau, gamma_1, gamma_2, omega, c_tilde_bytes) = mldsa44_params();
+        let verifier = MLDSAVerifier::<F, C, 2>::new(config, k, l, d, eta, tau, gamma_1, gamma_2, omega, c_tilde_bytes);
         
         let pk_bytes = public_key.as_bytes();
         let (_, sig_bytes, _) = self.get_signature_data(public_key, signed_message)?;
@@ -141,12 +137,8 @@ impl MLDSAVariant for MLDSA65 {
         type C = PoseidonGoldilocksConfig;
         type F = <C as plonky2::plonk::config::GenericConfig<2>>::F;
         // ML-DSA-65 parameters: eta=4, gamma_1=2^19, gamma_2=(q-1)/32, tau=49, omega=55
-        let eta = 4;
-        let gamma_1 = 1 << 19;
-        let gamma_2 = (crate::constants::Q - 1) / 32;
-        let tau = 49;
-        let omega = 55;
-        let verifier = CompleteMLDSAVerifierCircuit::<F, C, 2>::new(config, self.k(), self.l(), eta, gamma_1, gamma_2, tau, omega);
+        let (k, l, d, eta, tau, gamma_1, gamma_2, omega, c_tilde_bytes) = mldsa65_params();
+        let verifier = MLDSAVerifier::<F, C, 2>::new(config, k, l, d, eta, tau, gamma_1, gamma_2, omega, c_tilde_bytes);
         
         let pk_bytes = public_key.as_bytes();
         let (_, sig_bytes, _) = self.get_signature_data(public_key, signed_message)?;
@@ -208,12 +200,8 @@ impl MLDSAVariant for MLDSA87 {
         type C = PoseidonGoldilocksConfig;
         type F = <C as plonky2::plonk::config::GenericConfig<2>>::F;
         // ML-DSA-87 parameters: eta=2, gamma_1=2^19, gamma_2=(q-1)/32, tau=60, omega=75
-        let eta = 2;
-        let gamma_1 = 1 << 19;
-        let gamma_2 = (crate::constants::Q - 1) / 32;
-        let tau = 60;
-        let omega = 75;
-        let verifier = CompleteMLDSAVerifierCircuit::<F, C, 2>::new(config, self.k(), self.l(), eta, gamma_1, gamma_2, tau, omega);
+        let (k, l, d, eta, tau, gamma_1, gamma_2, omega, c_tilde_bytes) = mldsa87_params();
+        let verifier = MLDSAVerifier::<F, C, 2>::new(config, k, l, d, eta, tau, gamma_1, gamma_2, omega, c_tilde_bytes);
         
         let pk_bytes = public_key.as_bytes();
         let (_, sig_bytes, _) = self.get_signature_data(public_key, signed_message)?;

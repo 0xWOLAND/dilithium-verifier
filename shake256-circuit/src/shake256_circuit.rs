@@ -79,7 +79,7 @@ where
     /// 
     /// # Returns
     /// * Computed output targets
-    fn build_shake256_circuit(
+    pub fn build_shake256_circuit(
         builder: &mut CircuitBuilder<F, D>,
         input_targets: &[Target],
         _output_targets: &[Target],
