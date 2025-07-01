@@ -4,6 +4,13 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-anyhow = "1.0.98"
-plonky2 = "1.1.0"
-rand = "0.9.1"
+plonky2 = "0.2"
+plonky2_field = "0.2"
+anyhow = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+sha3 = "0.10"
+hex = "0.4"
+
+[dev-dependencies]
+rand = "0.8"
+criterion = "0.5"
