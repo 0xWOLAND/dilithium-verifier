@@ -1,16 +1,17 @@
-use mldsa_verifier::MLDSASigner;
+use mldsa_verifier::{MLDSAVariant, MLDSA44, MLDSA65, MLDSA87};
+
+fn test_variant<V: MLDSAVariant>(variant: V) -> anyhow::Result<()> {
+    let (pk, sk) = variant.generate_keypair();
+    let message = b"test";
+    let signed_message = variant.sign_message(&sk, message)?;
+    let verified_message = variant.verify_signature(&pk, &signed_message)?;
+    assert_eq!(message, verified_message.as_slice());
+    Ok(())
+}
 
 fn main() -> anyhow::Result<()> {
-    // Generate keypair
-    let (pk, sk) = MLDSASigner::generate_keypair();
-    
-    // Sign message
-    let message = b"Hello ML-DSA!";
-    let signed_message = MLDSASigner::sign_message(&sk, message)?;
-    
-    // Verify signature
-    let verified_message = MLDSASigner::verify_signature(&pk, &signed_message)?;
-    assert_eq!(message, verified_message.as_slice());
-    
+    test_variant(MLDSA44)?;
+    test_variant(MLDSA65)?;
+    test_variant(MLDSA87)?;
     Ok(())
 }

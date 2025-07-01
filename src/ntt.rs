@@ -1,4 +1,6 @@
 use plonky2::field::extension::Extendable;
+
+#[allow(unused_imports)]
 use plonky2::field::types::Field;
 use plonky2::hash::hash_types::RichField;
 use plonky2::iop::target::Target;
@@ -152,6 +154,8 @@ fn bitrev(a: u32, bits: usize) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    
+    #[allow(unused_imports)]
     use plonky2::field::goldilocks_field::GoldilocksField;
     use plonky2::iop::witness::{PartialWitness, WitnessWrite};
     use plonky2::plonk::circuit_data::CircuitConfig;

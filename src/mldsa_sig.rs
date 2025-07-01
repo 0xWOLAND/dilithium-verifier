@@ -2,9 +2,6 @@ use pqcrypto_mldsa::mldsa65::*;
 use pqcrypto_traits::sign::{PublicKey, SignedMessage};
 use anyhow::Result;
 
-use crate::constants::*;
-use crate::types::{MLDSAPublicKeyTarget, MLDSASignatureTarget, PolynomialTarget};
-
 pub struct MLDSASigner;
 
 impl MLDSASigner {

@@ -1,4 +1,5 @@
 use plonky2::field::extension::Extendable;
+#[allow(unused_imports)]
 use plonky2::field::types::Field;
 use plonky2::hash::hash_types::RichField;
 use plonky2::iop::target::Target;

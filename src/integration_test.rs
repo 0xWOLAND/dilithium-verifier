@@ -1,4 +1,5 @@
-use crate::{MLDSASigner, MLDSAVerifierCircuit};
+use crate::{MLDSASigner};
+use crate::simple_verifier::SimpleMLDSAVerifierCircuit;
 use plonky2::plonk::circuit_data::CircuitConfig;
 use plonky2::plonk::config::PoseidonGoldilocksConfig;
 
@@ -28,7 +29,7 @@ mod tests {
         // Test ZK circuit construction
         let config = CircuitConfig::standard_recursion_config();
         match std::panic::catch_unwind(|| {
-            MLDSAVerifierCircuit::<F, C, D>::new(config)
+            SimpleMLDSAVerifierCircuit::<F, C, D>::new(config, 4, 4)
         }) {
             Ok(verifier) => {
                 // If circuit builds successfully, try proof generation

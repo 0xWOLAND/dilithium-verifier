@@ -1,5 +1,6 @@
 [package]
 name = "mldsa-verifier"
+authors = ["Bhargav Annem"]
 version = "0.1.0"
 edition = "2021"
 
@@ -12,6 +13,7 @@ sha3 = "0.10"
 hex = "0.4"
 pqcrypto-mldsa = "0.1"
 pqcrypto-traits = "0.3"
+shake256-circuit = { path = "shake256-circuit" }
 
 [dev-dependencies]
 rand = "0.8"
