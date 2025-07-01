@@ -1,23 +1,9 @@
-use serde::{Deserialize, Serialize};
 use plonky2::field::extension::Extendable;
 use plonky2::hash::hash_types::RichField;
 use plonky2::iop::target::Target;
 use plonky2::plonk::circuit_builder::CircuitBuilder;
 
 use crate::constants::*;
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct DilithiumPublicKey {
-    pub rho: [u8; SEEDBYTES],
-    pub t1: Vec<Vec<u32>>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct DilithiumSignature {
-    pub c: [u8; SEEDBYTES],
-    pub z: Vec<Vec<u32>>,
-    pub h: Vec<Vec<u32>>,
-}
 
 #[derive(Clone, Debug)]
 pub struct PolynomialTarget {
@@ -42,13 +28,13 @@ impl PolynomialTarget {
 }
 
 #[derive(Clone, Debug)]
-pub struct DilithiumPublicKeyTarget {
+pub struct MLDSAPublicKeyTarget {
     pub rho: Vec<Target>,
     pub t1: Vec<PolynomialTarget>,
 }
 
 #[derive(Clone, Debug)]
-pub struct DilithiumSignatureTarget {
+pub struct MLDSASignatureTarget {
     pub c: Vec<Target>,
     pub z: Vec<PolynomialTarget>,
     pub h: Vec<PolynomialTarget>,

@@ -267,22 +267,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "dilithium-verifier"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "criterion",
- "hex",
- "plonky2",
- "plonky2_field",
- "pqcrypto-mldsa",
- "pqcrypto-traits",
- "rand",
- "serde",
- "sha3",
-]
-
-[[package]]
 name = "dunce"
 version = "1.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -468,6 +452,22 @@ name = "memchr"
 version = "2.7.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32a282da65faaf38286cf3be983213fcf1d2e2a58700e808f83f4ea9a4804bc0"
+
+[[package]]
+name = "mldsa-verifier"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "criterion",
+ "hex",
+ "plonky2",
+ "plonky2_field",
+ "pqcrypto-mldsa",
+ "pqcrypto-traits",
+ "rand",
+ "serde",
+ "sha3",
+]
 
 [[package]]
 name = "num"

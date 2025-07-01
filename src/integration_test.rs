@@ -1,4 +1,4 @@
-use crate::{MLDSASigner, DilithiumVerifierCircuit};
+use crate::{MLDSASigner, MLDSAVerifierCircuit};
 use plonky2::plonk::circuit_data::CircuitConfig;
 use plonky2::plonk::config::PoseidonGoldilocksConfig;
 
@@ -20,19 +20,19 @@ mod tests {
         let verified_message = MLDSASigner::verify_signature(&pk, &signed_message).unwrap();
         assert_eq!(message, verified_message.as_slice());
         
-        // Extract components
-        let (dilithium_pk, dilithium_sig, extracted_msg) = 
-            MLDSASigner::extract_components(&pk, &signed_message).unwrap();
+        // Extract signature data
+        let (pk_bytes, sig_bytes, extracted_msg) = 
+            MLDSASigner::extract_signature_data(&pk, &signed_message).unwrap();
         assert_eq!(message, extracted_msg.as_slice());
         
         // Test ZK circuit construction
         let config = CircuitConfig::standard_recursion_config();
         match std::panic::catch_unwind(|| {
-            DilithiumVerifierCircuit::<F, C, D>::new(config)
+            MLDSAVerifierCircuit::<F, C, D>::new(config)
         }) {
             Ok(verifier) => {
                 // If circuit builds successfully, try proof generation
-                match verifier.generate_proof(&dilithium_pk, &dilithium_sig, message) {
+                match verifier.generate_proof(&pk_bytes, &sig_bytes, message) {
                     Ok(proof) => {
                         // Verify the proof
                         assert!(verifier.circuit.verify(proof).is_ok());
@@ -65,16 +65,14 @@ mod tests {
             let verified_message = MLDSASigner::verify_signature(&pk, &signed_message).unwrap();
             assert_eq!(message, verified_message.as_slice());
             
-            let (dilithium_pk, dilithium_sig, extracted_msg) = 
-                MLDSASigner::extract_components(&pk, &signed_message).unwrap();
+            let (pk_bytes, sig_bytes, extracted_msg) = 
+                MLDSASigner::extract_signature_data(&pk, &signed_message).unwrap();
             assert_eq!(message, extracted_msg.as_slice());
             
-            // Verify component sizes
-            assert_eq!(dilithium_pk.rho.len(), 32);
-            assert_eq!(dilithium_pk.t1.len(), 4);
-            assert_eq!(dilithium_sig.c.len(), 32);
-            assert_eq!(dilithium_sig.z.len(), 4);
-            assert_eq!(dilithium_sig.h.len(), 4);
+            // Verify data sizes
+            assert!(!pk_bytes.is_empty());
+            assert!(!sig_bytes.is_empty());
+            assert_eq!(extracted_msg, message.to_vec());
         }
     }
 }

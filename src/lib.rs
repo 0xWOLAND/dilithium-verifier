@@ -8,5 +8,5 @@ pub mod mldsa_sig;
 #[cfg(test)]
 pub mod integration_test;
 
-pub use verifier::DilithiumVerifierCircuit;
+pub use verifier::MLDSAVerifierCircuit;
 pub use mldsa_sig::MLDSASigner;
