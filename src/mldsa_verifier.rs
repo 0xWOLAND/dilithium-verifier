@@ -717,18 +717,28 @@ where
     /// Unpack signature exactly matching dilithium-py _unpack_sig  
     /// Returns (c_tilde, z, h) where c_tilde is challenge hash, z is signature vector, h is hint vector
     fn unpack_sig(&self, sig_bytes: &[u8]) -> Result<(Vec<u8>, Vec<Vec<u32>>, Vec<Vec<u32>>)> {
-        if sig_bytes.len() < self.c_tilde_bytes + self.omega {
+        if sig_bytes.len() < self.c_tilde_bytes {
             return Err(anyhow::anyhow!("Signature too short: expected at least {}, got {}", 
-                self.c_tilde_bytes + self.omega, sig_bytes.len()));
+                self.c_tilde_bytes, sig_bytes.len()));
         }
         
         // Extract c_tilde (first c_tilde_bytes)
         let c_tilde = sig_bytes[..self.c_tilde_bytes].to_vec();
         
-        // Extract z_bytes (middle portion) and h_bytes (last omega bytes)
-        let h_start = sig_bytes.len() - self.omega;
-        let z_bytes = &sig_bytes[self.c_tilde_bytes..h_start];
-        let h_bytes = &sig_bytes[h_start..];
+        // Calculate expected z_bytes size
+        let z_bits = if self.gamma_1 == (1 << 17) { 18 } else { 20 };
+        let z_bytes_len = (self.l * N * z_bits + 7) / 8;
+        
+        if sig_bytes.len() < self.c_tilde_bytes + z_bytes_len {
+            return Err(anyhow::anyhow!("Signature too short for z: expected at least {}, got {}", 
+                self.c_tilde_bytes + z_bytes_len, sig_bytes.len()));
+        }
+        
+        // Extract z_bytes
+        let z_bytes = &sig_bytes[self.c_tilde_bytes..self.c_tilde_bytes + z_bytes_len];
+        
+        // Extract h_bytes (everything after z)
+        let h_bytes = &sig_bytes[self.c_tilde_bytes + z_bytes_len..];
         
         // Unpack z vector using bit_unpack_z
         let z = self.bit_unpack_z(z_bytes)?;
@@ -797,18 +807,28 @@ where
     /// Unpack hint vector h from packed bytes
     /// Exactly matches dilithium-py _unpack_h implementation
     fn unpack_h(&self, h_bytes: &[u8]) -> Result<Vec<Vec<u32>>> {
-        if h_bytes.len() != self.omega {
-            return Err(anyhow::anyhow!("Invalid hint bytes length: expected {}, got {}", self.omega, h_bytes.len()));
+        if h_bytes.len() < self.k {
+            return Err(anyhow::anyhow!("Invalid hint bytes length: expected at least {}, got {}", self.k, h_bytes.len()));
         }
         
-        // Last k bytes are cumulative offsets
-        let offsets_start = self.omega - self.k;
-        let offset_bytes = &h_bytes[offsets_start..];
+        // Last k bytes are cumulative offsets  
+        let data_len = h_bytes.len() - self.k;
+        let offset_bytes = &h_bytes[data_len..];
         
-        // Build offsets array starting with 0
+        // Build offsets array starting with 0 (as in dilithium-py: offsets = [0] + list(h_bytes[-self.k:]))
         let mut offsets = vec![0usize];
         for &byte in offset_bytes {
             offsets.push(byte as usize);
+        }
+        
+        // Validate offsets
+        for i in 1..offsets.len() {
+            if offsets[i] > data_len {
+                return Err(anyhow::anyhow!("Invalid offset: {} exceeds data length {}", offsets[i], data_len));
+            }
+            if i > 1 && offsets[i] < offsets[i-1] {
+                return Err(anyhow::anyhow!("Invalid offsets: not monotonic at position {}", i));
+            }
         }
         
         // Extract non-zero positions for each polynomial
@@ -818,10 +838,10 @@ where
             let start = offsets[i];
             let end = offsets[i + 1];
             
-            // Get positions for this polynomial
+            // Get positions for this polynomial from h_bytes[start:end]
             for j in start..end {
-                if j >= offsets_start {
-                    return Err(anyhow::anyhow!("Invalid offset: position index out of bounds"));
+                if j >= data_len {
+                    return Err(anyhow::anyhow!("Invalid offset: position index {} out of bounds (max {})", j, data_len));
                 }
                 let pos = h_bytes[j] as usize;
                 if pos >= N {
