@@ -7,8 +7,6 @@ pub mod mldsa_sig;
 pub mod mldsa_trait;
 
 #[cfg(test)]
-pub mod refactored_verification_test;
-#[cfg(test)]
 pub mod verification_test;
 
 pub use mldsa_verifier::MLDSAVerifier;

@@ -38,12 +38,19 @@ mod verification_tests {
         
         // Generate ZK proof
         let proof_result = verifier.generate_proof(pk_bytes, &sig_bytes, message);
+        if let Err(e) = &proof_result {
+            println!("Proof generation error: {:?}", e);
+        }
         assert!(proof_result.is_ok(), "Proof generation should succeed for valid signature");
         
         // Verify ZK proof
         let proof = proof_result.unwrap();
-        let verify_result = verifier.circuit.verify(proof);
+        let verify_result = verifier.circuit.verify(proof.clone());
         assert!(verify_result.is_ok(), "ZK proof verification should succeed for valid signature");
+        
+        // Check that the proof indicates the signature is valid
+        let is_valid = verifier.is_signature_valid(&proof);
+        assert!(is_valid, "Good signature should be detected as valid by the circuit");
     }
 
     /// Test ML-DSA-44 signature verification with bad signature (corrupted)
@@ -78,16 +85,17 @@ mod verification_tests {
         
         // Generate ZK proof (should still succeed as it's about circuit construction)
         let proof_result = verifier.generate_proof(pk_bytes, &sig_bytes, message);
+        assert!(proof_result.is_ok(), "Proof generation should succeed even for bad signatures");
         
-        // The proof generation might succeed but verification should detect the invalid signature
-        if let Ok(proof) = proof_result {
-            // The circuit should detect that the signature is invalid
-            // This would be reflected in the public outputs of the proof
-            let verify_result = verifier.circuit.verify(proof);
-            // In a complete implementation, we would check the public outputs
-            // to see that the verification result is "false"
-            println!("Bad signature test: proof generated but should indicate failure");
-        }
+        let proof = proof_result.unwrap();
+        
+        // Verify the ZK proof itself is valid
+        let verify_result = verifier.circuit.verify(proof.clone());
+        assert!(verify_result.is_ok(), "ZK proof should be valid even for bad signatures");
+        
+        // Check that the proof indicates the signature is invalid
+        let is_valid = verifier.is_signature_valid(&proof);
+        assert!(!is_valid, "Bad signature should be detected as invalid by the circuit");
     }
 
     /// Test ML-DSA-65 signature verification
@@ -114,8 +122,12 @@ mod verification_tests {
         assert!(proof_result.is_ok(), "Proof generation should succeed for ML-DSA-65");
         
         let proof = proof_result.unwrap();
-        let verify_result = verifier.circuit.verify(proof);
+        let verify_result = verifier.circuit.verify(proof.clone());
         assert!(verify_result.is_ok(), "ZK proof verification should succeed for ML-DSA-65");
+        
+        // Check that the proof indicates the signature is valid
+        let is_valid = verifier.is_signature_valid(&proof);
+        assert!(is_valid, "Good ML-DSA-65 signature should be detected as valid");
     }
 
     /// Test ML-DSA-87 signature verification  
@@ -139,11 +151,18 @@ mod verification_tests {
         let sig_bytes = extract_signature_bytes(&signed_message, message);
         
         let proof_result = verifier.generate_proof(pk_bytes, &sig_bytes, message);
+        if let Err(e) = &proof_result {
+            println!("ML-DSA-87 proof generation error: {:?}", e);
+        }
         assert!(proof_result.is_ok(), "Proof generation should succeed for ML-DSA-87");
         
         let proof = proof_result.unwrap();
-        let verify_result = verifier.circuit.verify(proof);
+        let verify_result = verifier.circuit.verify(proof.clone());
         assert!(verify_result.is_ok(), "ZK proof verification should succeed for ML-DSA-87");
+        
+        // Check that the proof indicates the signature is valid
+        let is_valid = verifier.is_signature_valid(&proof);
+        assert!(is_valid, "Good ML-DSA-87 signature should be detected as valid");
     }
 
     /// Test signature verification with wrong public key
@@ -173,8 +192,17 @@ mod verification_tests {
         let sig_bytes = extract_signature_bytes(&signed_message, message);
         
         let proof_result = verifier.generate_proof(pk_bytes, &sig_bytes, message);
-        // In a complete implementation, this should fail or the proof should indicate failure
-        println!("Wrong public key test: {:?}", proof_result.is_ok());
+        assert!(proof_result.is_ok(), "Proof generation should succeed even with wrong key");
+        
+        let proof = proof_result.unwrap();
+        
+        // Verify the ZK proof itself is valid
+        let verify_result = verifier.circuit.verify(proof.clone());
+        assert!(verify_result.is_ok(), "ZK proof should be valid even with wrong key");
+        
+        // Check that the proof indicates the signature is invalid
+        let is_valid = verifier.is_signature_valid(&proof);
+        assert!(!is_valid, "Wrong public key should cause signature to be detected as invalid");
     }
 
     /// Extract signature bytes from signed message, removing the original message
