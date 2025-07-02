@@ -10,10 +10,10 @@ A modular implementation of ML-DSA (Module Lattice Digital Signature Algorithm) 
 
 The codebase is organized into standalone gadgets:
 
-- **`bit-operations-gadget`**: Basic bitwise operations for ZK circuits
-- **`shake256-gadget`**: SHAKE256 hash function implementation
-- **`ntt-gadget`**: Number Theoretic Transform operations
-- **`mldsa-gadget`**: ML-DSA signature verification
+- **`bit-operations`**: Basic bitwise operations for ZK circuits
+- **`shake256`**: SHAKE256 hash function implementation
+- **`ntt`**: Number Theoretic Transform operations
+- **`mldsa`**: ML-DSA signature verification
 
 ## Getting Started
 
@@ -24,10 +24,10 @@ cargo test
 
 Run tests for a specific gadget:
 ```bash
-cargo test -p shake256-gadget
-cargo test -p ntt-gadget
-cargo test -p mldsa-gadget
-cargo test -p bit-operations-gadget
+cargo test -p shake256
+cargo test -p ntt
+cargo test -p mldsa
+cargo test -p bit-operations
 ```
 
 ## Architecture

@@ -1,10 +1,10 @@
 [workspace]
 members = [
-    "bit-operations-gadget",
-    "keccak-permutation-gadget",
-    "shake256-gadget",
-    "ntt-gadget", 
-    "mldsa-gadget",
+    "bit-operations",
+    "keccak-permutation",
+    "shake256",
+    "ntt", 
+    "mldsa",
 ]
 resolver = "2"
 

@@ -1,5 +1,5 @@
 [package]
-name = "mldsa-gadget"
+name = "mldsa"
 version = "0.1.0"
 edition = "2021"
 
@@ -10,8 +10,8 @@ anyhow = { workspace = true }
 serde = { workspace = true }
 pqcrypto-mldsa = { workspace = true }
 pqcrypto-traits = { workspace = true }
-shake256-gadget = { path = "../shake256-gadget" }
-ntt-gadget = { path = "../ntt-gadget" }
+shake256 = { path = "../shake256" }
+ntt = { path = "../ntt" }
 
 [dev-dependencies]
 rand = { workspace = true }

@@ -1,5 +1,5 @@
 [package]
-name = "shake256-gadget"
+name = "shake256"
 version = "0.1.0"
 edition = "2021"
 
@@ -7,8 +7,8 @@ edition = "2021"
 plonky2 = { workspace = true }
 anyhow = { workspace = true }
 sha3 = { workspace = true }
-bit-operations-gadget = { path = "../bit-operations-gadget" }
-keccak-permutation-gadget = { path = "../keccak-permutation-gadget" }
+bit-operations = { path = "../bit-operations" }
+keccak-permutation = { path = "../keccak-permutation" }
 
 [dev-dependencies]
 hex = { workspace = true }

@@ -28,7 +28,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c08606f8c3cbf4ce6ec8e28fb0014a2c086708fe954eaa885384a6165172e7e8"
 
 [[package]]
-name = "bit-operations-gadget"
+name = "bit-operations"
 version = "0.1.0"
 dependencies = [
  "anyhow",
@@ -287,11 +287,11 @@ dependencies = [
 ]
 
 [[package]]
-name = "keccak-permutation-gadget"
+name = "keccak-permutation"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "bit-operations-gadget",
+ "bit-operations",
  "hex",
  "plonky2",
 ]
@@ -309,22 +309,22 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "13dc2df351e3202783a1fe0d44375f7295ffb4049267b0f3018346dc122a1d94"
 
 [[package]]
-name = "mldsa-gadget"
+name = "mldsa"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "ntt-gadget",
+ "ntt",
  "plonky2",
  "plonky2_field",
  "pqcrypto-mldsa",
  "pqcrypto-traits",
  "rand",
  "serde",
- "shake256-gadget",
+ "shake256",
 ]
 
 [[package]]
-name = "ntt-gadget"
+name = "ntt"
 version = "0.1.0"
 dependencies = [
  "anyhow",
@@ -631,13 +631,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "shake256-gadget"
+name = "shake256"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "bit-operations-gadget",
+ "bit-operations",
  "hex",
- "keccak-permutation-gadget",
+ "keccak-permutation",
  "plonky2",
  "sha3",
 ]

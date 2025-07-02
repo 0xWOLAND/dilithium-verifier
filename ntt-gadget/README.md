@@ -36,7 +36,7 @@ The implementation ensures soundness through constraint systems. Invalid proofs 
 ## Usage
 
 ```rust
-use ntt_gadget::{NttGadget, PolynomialTarget, N};
+use ntt::{NttGadget, PolynomialTarget, N};
 use plonky2::plonk::circuit_builder::CircuitBuilder;
 
 // Create polynomials

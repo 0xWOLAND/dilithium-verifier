@@ -2,8 +2,8 @@ use plonky2::field::extension::Extendable;
 use plonky2::hash::hash_types::RichField;
 use plonky2::iop::target::Target;
 use plonky2::plonk::circuit_builder::CircuitBuilder;
-use shake256_gadget::Shake256Gadget;
-use ntt_gadget::{NttGadget, PolynomialTarget};
+use shake256::Shake256Gadget;
+use ntt::{NttGadget, PolynomialTarget};
 
 /// ML-DSA Gadget for zero-knowledge verification
 pub struct MldsaGadget;
