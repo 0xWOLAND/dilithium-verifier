@@ -1,0 +1,11 @@
+[package]
+name = "ntt-gadget"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+plonky2 = { workspace = true }
+plonky2_field = { workspace = true }
+anyhow = { workspace = true }
+
+[dev-dependencies]

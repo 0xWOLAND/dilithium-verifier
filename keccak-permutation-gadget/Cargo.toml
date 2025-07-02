@@ -1,0 +1,12 @@
+[package]
+name = "keccak-permutation-gadget"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+plonky2 = { workspace = true }
+anyhow = { workspace = true }
+bit-operations-gadget = { path = "../bit-operations-gadget" }
+
+[dev-dependencies]
+hex = { workspace = true }

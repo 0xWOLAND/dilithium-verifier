@@ -1,0 +1,17 @@
+[package]
+name = "mldsa-gadget"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+plonky2 = { workspace = true }
+plonky2_field = { workspace = true }
+anyhow = { workspace = true }
+serde = { workspace = true }
+pqcrypto-mldsa = { workspace = true }
+pqcrypto-traits = { workspace = true }
+shake256-gadget = { path = "../shake256-gadget" }
+ntt-gadget = { path = "../ntt-gadget" }
+
+[dev-dependencies]
+rand = { workspace = true }
