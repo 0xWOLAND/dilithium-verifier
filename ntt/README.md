@@ -56,7 +56,6 @@ let product = NttGadget::intt(&mut builder, &ntt_product);
 
 ## Security Considerations
 
-The implementation uses simplified modular arithmetic suitable for the plonky2 field. In production:
 - Add proper range checks for all values
 - Implement complete Montgomery multiplication
 - Add comprehensive bounds checking

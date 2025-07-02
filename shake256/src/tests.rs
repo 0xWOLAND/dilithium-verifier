@@ -83,6 +83,7 @@ fn get_nist_test_vectors() -> Vec<Shake256TestVector> {
 #[cfg(test)]
 mod completeness_tests {
     use super::*;
+    use plonky2_field::types::PrimeField64;
 
     #[test]
     fn test_shake256_nist_vectors_completeness() {
@@ -184,6 +185,7 @@ mod completeness_tests {
 #[cfg(test)]
 mod soundness_tests {
     use super::*;
+    use plonky2_field::types::PrimeField64;
 
     #[test]
     fn test_shake256_soundness_tampered_input() {
@@ -308,6 +310,7 @@ mod soundness_tests {
 #[cfg(test)]
 mod corner_case_tests {
     use super::*;
+    use plonky2_field::types::PrimeField64;
 
     #[test]
     fn test_shake256_empty_input() {
@@ -412,6 +415,7 @@ mod corner_case_tests {
 #[cfg(test)]
 mod keccak_integration_tests {
     use super::*;
+    use plonky2_field::types::PrimeField64;
     use keccak_permutation::KeccakPermutationGadget;
 
     #[test]
@@ -464,6 +468,7 @@ mod keccak_integration_tests {
 #[cfg(test)]
 mod performance_tests {
     use super::*;
+    use plonky2_field::types::PrimeField64;
     use std::time::Instant;
 
     #[test]
@@ -507,5 +512,319 @@ mod performance_tests {
             println!("  Circuit size: {} gates", circuit.common.gates.len());
             println!();
         }
+    }
+}
+
+#[cfg(test)]
+mod range_check_tests {
+    use super::*;
+    use plonky2_field::types::PrimeField64;
+
+    /// Range check verification tests for SHAKE256
+    /// These tests verify that range checks correctly enforce constraints on input/output values
+
+    #[test]
+    fn test_shake256_input_range_checks_valid_bytes() {
+        let config = CircuitConfig::standard_recursion_config();
+        
+        // Test that valid byte inputs (0-255) work correctly
+        let valid_byte_patterns = [
+            // All zeros (minimum valid)
+            vec![0u8; 32],
+            // All maximum bytes
+            vec![255u8; 32],
+            // Sequential pattern
+            (0..32).map(|i| i as u8).collect::<Vec<_>>(),
+            // Mixed valid patterns
+            vec![0, 1, 15, 16, 31, 32, 63, 64, 127, 128, 191, 192, 223, 224, 239, 240, 247, 248, 251, 252, 253, 254, 255, 127, 63, 31, 15, 7, 3, 1, 0, 85],
+            // Random-like but valid byte values
+            (0..64).map(|i| ((i * 7 + 13) % 256) as u8).collect::<Vec<_>>(),
+        ];
+        
+        for (test_idx, test_bytes) in valid_byte_patterns.iter().enumerate() {
+            let mut builder = CircuitBuilder::<F, D>::new(config.clone());
+            
+            // Create input targets with valid byte values
+            let input_targets: Vec<Target> = test_bytes.iter()
+                .map(|&byte| builder.constant(F::from_canonical_u32(byte as u32)))
+                .collect();
+            
+            // Hash the input (this includes range checks internally through Keccak permutation)
+            let output_targets = Shake256Gadget::hash(&mut builder, &input_targets, 32);
+            
+            // Make inputs and outputs public for verification
+            for &input in &input_targets {
+                builder.register_public_input(input);
+            }
+            for &output in &output_targets {
+                builder.register_public_input(output);
+            }
+            
+            let circuit = builder.build::<C>();
+            let pw = PartialWitness::new();
+            
+            // These should all succeed for valid byte inputs
+            let proof = circuit.prove(pw).expect(&format!("proof should succeed for valid byte inputs (test case {})", test_idx));
+            circuit.verify(proof.clone()).expect(&format!("verification should succeed for valid byte inputs (test case {})", test_idx));
+            
+            // Verify outputs are in valid byte range [0, 255]
+            let input_len = input_targets.len();
+            for i in input_len..(input_len + 32) {
+                let output_val = proof.public_inputs[i].to_canonical_u64();
+                assert!(output_val <= 255, "Output {} should be in byte range [0, 255] for test case {}", output_val, test_idx);
+            }
+        }
+    }
+
+    #[test]
+    fn test_shake256_output_range_consistency() {
+        let config = CircuitConfig::standard_recursion_config();
+        
+        // Test that output bytes are consistently in valid range for various output lengths
+        let output_lengths = [1, 16, 32, 64, 128, 256];
+        let test_input = b"range check test input for SHAKE256";
+        
+        for &output_len in &output_lengths {
+            let mut builder = CircuitBuilder::<F, D>::new(config.clone());
+            
+            let input_targets: Vec<Target> = test_input.iter()
+                .map(|&byte| builder.constant(F::from_canonical_u32(byte as u32)))
+                .collect();
+            
+            let output_targets = Shake256Gadget::hash(&mut builder, &input_targets, output_len);
+            
+            assert_eq!(output_targets.len(), output_len, "Output length should match requested length");
+            
+            // Make outputs public to verify range
+            for &output in &output_targets {
+                builder.register_public_input(output);
+            }
+            
+            let circuit = builder.build::<C>();
+            let pw = PartialWitness::new();
+            
+            let proof = circuit.prove(pw).expect(&format!("proof should succeed for output length {}", output_len));
+            circuit.verify(proof.clone()).expect(&format!("verification should succeed for output length {}", output_len));
+            
+            // Verify all outputs are in valid byte range
+            for i in 0..output_len {
+                let output_val = proof.public_inputs[i].to_canonical_u64();
+                assert!(output_val <= 255, "Output byte {} should be in range [0, 255] for output length {}", output_val, output_len);
+            }
+        }
+    }
+
+    #[test]
+    fn test_shake256_padding_range_compliance() {
+        let config = CircuitConfig::standard_recursion_config();
+        
+        // Test that padding bytes maintain proper range constraints
+        // This is important because padding affects the final hash
+        
+        let test_cases = [
+            // Test messages of different lengths to trigger different padding scenarios
+            (vec![], "empty message"),
+            (b"a".to_vec(), "single byte"),
+            (vec![0u8; 135], "rate - 1 bytes"), // Just under SHAKE256 rate (136 bytes)
+            (vec![0u8; 136], "exactly rate bytes"), // Exactly SHAKE256 rate
+            (vec![0u8; 137], "rate + 1 bytes"), // Just over SHAKE256 rate
+            (vec![0u8; 271], "2*rate - 1 bytes"), // Just under 2*rate
+            (vec![0u8; 272], "exactly 2*rate bytes"), // Exactly 2*rate
+        ];
+        
+        for (input_bytes, description) in test_cases.iter() {
+            let mut builder = CircuitBuilder::<F, D>::new(config.clone());
+            
+            let input_targets: Vec<Target> = input_bytes.iter()
+                .map(|&byte| builder.constant(F::from_canonical_u32(byte as u32)))
+                .collect();
+            
+            let output_targets = Shake256Gadget::hash(&mut builder, &input_targets, 64);
+            
+            // Make outputs public to verify range
+            for &output in &output_targets {
+                builder.register_public_input(output);
+            }
+            
+            let circuit = builder.build::<C>();
+            let pw = PartialWitness::new();
+            
+            let proof = circuit.prove(pw).expect(&format!("proof should succeed for {}", description));
+            circuit.verify(proof.clone()).expect(&format!("verification should succeed for {}", description));
+            
+            // Verify all outputs are in valid byte range
+            for i in 0..64 {
+                let output_val = proof.public_inputs[i].to_canonical_u64();
+                assert!(output_val <= 255, "Output byte {} should be in range [0, 255] for {}", output_val, description);
+            }
+        }
+    }
+
+    #[test]
+    fn test_shake256_state_absorption_range_checks() {
+        let config = CircuitConfig::standard_recursion_config();
+        
+        // Test that state absorption maintains range constraints
+        // This verifies that XOR operations during absorption don't violate ranges
+        
+        let absorption_test_cases = [
+            // Case 1: Absorb data with all bits set (stress test XOR)
+            vec![0xFFu8; 136], // Full rate block of 0xFF
+            
+            // Case 2: Absorb alternating pattern (stress bit operations)
+            {
+                let mut pattern = Vec::new();
+                for i in 0..136 {
+                    pattern.push(if i % 2 == 0 { 0xAA } else { 0x55 });
+                }
+                pattern
+            },
+            
+            // Case 3: Absorb sequential bytes (test arithmetic patterns)
+            (0..136).map(|i| (i % 256) as u8).collect::<Vec<_>>(),
+            
+            // Case 4: Multiple rate blocks to test repeated absorption
+            {
+                let mut multi_block = Vec::new();
+                for block in 0..3 {
+                    for byte in 0..136 {
+                        multi_block.push(((block * 256 + byte) % 256) as u8);
+                    }
+                }
+                multi_block
+            }
+        ];
+        
+        for (case_idx, test_input) in absorption_test_cases.iter().enumerate() {
+            let mut builder = CircuitBuilder::<F, D>::new(config.clone());
+            
+            let input_targets: Vec<Target> = test_input.iter()
+                .map(|&byte| builder.constant(F::from_canonical_u32(byte as u32)))
+                .collect();
+            
+            let output_targets = Shake256Gadget::hash(&mut builder, &input_targets, 32);
+            
+            // Register outputs to verify range compliance during absorption
+            for &output in &output_targets {
+                builder.register_public_input(output);
+            }
+            
+            let circuit = builder.build::<C>();
+            let pw = PartialWitness::new();
+            
+            let proof = circuit.prove(pw).expect(&format!("Absorption test case {} should succeed", case_idx));
+            circuit.verify(proof.clone()).expect(&format!("Absorption test case {} should verify", case_idx));
+            
+            // Verify all outputs are in valid byte range
+            for i in 0..32 {
+                let output_val = proof.public_inputs[i].to_canonical_u64();
+                assert!(output_val <= 255, "Absorption test {} output {} should be in range [0, 255]", case_idx, output_val);
+            }
+        }
+    }
+
+    #[test]
+    fn test_shake256_squeeze_range_checks() {
+        let config = CircuitConfig::standard_recursion_config();
+        
+        // Test that squeezing maintains range constraints
+        // This verifies that extracting bytes from the state maintains valid ranges
+        
+        let squeeze_test_cases = [
+            (32, "single rate squeeze"),
+            (64, "partial second block squeeze"),
+            (136, "exactly one rate squeeze"),
+            (200, "more than one rate squeeze"),
+            (272, "exactly two rates squeeze"),
+            (300, "more than two rates squeeze"),
+        ];
+        
+        let test_input = b"squeeze range test input";
+        
+        for (output_len, description) in squeeze_test_cases.iter() {
+            let mut builder = CircuitBuilder::<F, D>::new(config.clone());
+            
+            let input_targets: Vec<Target> = test_input.iter()
+                .map(|&byte| builder.constant(F::from_canonical_u32(byte as u32)))
+                .collect();
+            
+            let output_targets = Shake256Gadget::hash(&mut builder, &input_targets, *output_len);
+            
+            assert_eq!(output_targets.len(), *output_len, "Output length should match requested for {}", description);
+            
+            // Register all outputs to verify range compliance during squeezing
+            for &output in &output_targets {
+                builder.register_public_input(output);
+            }
+            
+            let circuit = builder.build::<C>();
+            let pw = PartialWitness::new();
+            
+            let proof = circuit.prove(pw).expect(&format!("Squeeze test {} should succeed", description));
+            circuit.verify(proof.clone()).expect(&format!("Squeeze test {} should verify", description));
+            
+            // Verify all squeezed outputs are in valid byte range
+            for i in 0..*output_len {
+                let output_val = proof.public_inputs[i].to_canonical_u64();
+                assert!(output_val <= 255, "Squeeze test {} output {} should be in range [0, 255]", description, output_val);
+            }
+        }
+    }
+
+    #[test]
+    fn test_shake256_keccak_state_range_integration() {
+        let config = CircuitConfig::standard_recursion_config();
+        
+        // Integration test: Verify that SHAKE256's use of Keccak state maintains range constraints
+        // This test ensures that the 32-bit range checks in Keccak permutation are properly enforced
+        
+        let mut builder = CircuitBuilder::<F, D>::new(config);
+        
+        // Create a substantial input that will exercise multiple Keccak rounds
+        let large_input: Vec<u8> = (0..500).map(|i| (i % 256) as u8).collect();
+        let input_targets: Vec<Target> = large_input.iter()
+            .map(|&byte| builder.constant(F::from_canonical_u32(byte as u32)))
+            .collect();
+        
+        let output_targets = Shake256Gadget::hash(&mut builder, &input_targets, 128);
+        
+        // Register inputs and outputs for comprehensive range verification
+        for &input in &input_targets {
+            builder.register_public_input(input);
+        }
+        for &output in &output_targets {
+            builder.register_public_input(output);
+        }
+        
+        let circuit = builder.build::<C>();
+        let pw = PartialWitness::new();
+        
+        let proof = circuit.prove(pw).expect("Keccak integration test should succeed");
+        circuit.verify(proof.clone()).expect("Keccak integration test should verify");
+        
+        let input_len = input_targets.len();
+        
+        // Verify all inputs are in valid byte range
+        for i in 0..input_len {
+            let input_val = proof.public_inputs[i].to_canonical_u64();
+            assert!(input_val <= 255, "Input {} should be in byte range [0, 255]", input_val);
+        }
+        
+        // Verify all outputs are in valid byte range  
+        for i in input_len..(input_len + 128) {
+            let output_val = proof.public_inputs[i].to_canonical_u64();
+            assert!(output_val <= 255, "Output {} should be in byte range [0, 255]", output_val);
+        }
+        
+        // Additional check: Verify that the circuit actually performed computation
+        // (outputs should be different from inputs for this non-trivial case)
+        let mut computation_performed = false;
+        for i in 0..128.min(input_len) {
+            if proof.public_inputs[i] != proof.public_inputs[input_len + i] {
+                computation_performed = true;
+                break;
+            }
+        }
+        assert!(computation_performed, "SHAKE256 should produce outputs different from inputs");
     }
 }

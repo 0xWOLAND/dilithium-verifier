@@ -33,6 +33,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "plonky2",
+ "plonky2_field",
 ]
 
 [[package]]
@@ -178,6 +179,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cfcf0ed7fe52a17a03854ec54a9f76d6d84508d1c0e66bc1793301c73fc8493c"
 dependencies = [
  "static_assertions",
+]
+
+[[package]]
+name = "gadget-tests"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bit-operations",
+ "keccak-permutation",
+ "ntt",
+ "plonky2",
+ "plonky2_field",
+ "sha3",
+ "shake256",
 ]
 
 [[package]]
@@ -639,6 +654,7 @@ dependencies = [
  "hex",
  "keccak-permutation",
  "plonky2",
+ "plonky2_field",
  "sha3",
 ]
 

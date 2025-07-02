@@ -1,0 +1,58 @@
+[package]
+name = "gadget-tests"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+plonky2 = { workspace = true }
+plonky2_field = { workspace = true }
+anyhow = { workspace = true }
+sha3 = { workspace = true }
+bit-operations = { path = "../bit-operations" }
+keccak-permutation = { path = "../keccak-permutation" }
+shake256 = { path = "../shake256" }
+ntt = { path = "../ntt" }
+
+[[bin]]
+name = "test_bit_operations"
+path = "../test_bit_operations.rs"
+
+[[bin]]
+name = "test_ntt"
+path = "../test_ntt.rs"
+
+[[bin]]
+name = "test_keccak"
+path = "../test_keccak.rs"
+
+[[bin]]
+name = "test_shake256"
+path = "../test_shake256.rs"
+
+[[bin]]
+name = "test_bit_operations_modified"
+path = "../test_bit_operations_modified.rs"
+
+[[bin]]
+name = "test_ntt_simple"
+path = "../test_ntt_simple.rs"
+
+[[bin]]
+name = "test_ntt_with_modified_constraint"
+path = "../test_ntt_with_modified_constraint.rs"
+
+[[bin]]
+name = "test_bit_operations_constraint_modifications"
+path = "../test_bit_operations_constraint_modifications.rs"
+
+[[bin]]
+name = "test_ntt_constraint_modifications"
+path = "../test_ntt_constraint_modifications.rs"
+
+[[bin]]
+name = "test_keccak_constraint_modifications"
+path = "../test_keccak_constraint_modifications.rs"
+
+[[bin]]
+name = "test_shake256_constraint_modifications"
+path = "../test_shake256_constraint_modifications.rs"

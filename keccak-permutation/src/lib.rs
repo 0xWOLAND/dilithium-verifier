@@ -37,7 +37,7 @@ pub const PI_OFFSETS: [usize; 25] = [
 ];
 
 impl KeccakPermutationGadget {
-    /// Apply the Keccak-f[1600] permutation to the state
+    /// Apply the Keccak-f[1600] permutation to the state with range checks
     /// State is represented as 50 targets (25 lanes * 2 targets per 64-bit lane)
     pub fn permute<F: RichField + Extendable<D>, const D: usize>(
         builder: &mut CircuitBuilder<F, D>,
@@ -45,8 +45,18 @@ impl KeccakPermutationGadget {
     ) {
         assert_eq!(state.len(), 50, "State must have 50 targets (25 lanes * 2 for 64-bit)");
         
+        // Range check all input state values to ensure they are 32-bit
+        for &value in state.iter() {
+            builder.range_check(value, 32);
+        }
+        
         for round in 0..KECCAK_ROUNDS {
             Self::keccak_round(builder, state, round);
+        }
+        
+        // Range check all output state values to ensure they remain 32-bit
+        for &value in state.iter() {
+            builder.range_check(value, 32);
         }
     }
     
@@ -177,40 +187,87 @@ impl KeccakPermutationGadget {
         state[0] = bitwise_xor(builder, state[0], round_constant);
     }
     
-    /// Helper: Rotate left by 1 bit (simplified for circuit)
+    /// Helper: Rotate left by 1 bit for 32-bit values
     fn rotate_left_1<F: RichField + Extendable<D>, const D: usize>(
         builder: &mut CircuitBuilder<F, D>,
         value: Target,
     ) -> Target {
-        // (value << 1) | (value >> 31) for 32-bit values
+        // For 32-bit values: (value << 1) | (value >> 31)
+        // Extract the MSB (bit 31)
+        let msb_mask = builder.constant(F::from_canonical_u32(0x80000000));
+        let msb = bitwise_and(builder, value, msb_mask);
+        
+        // Shift value left by 1, keeping only lower 32 bits
         let shifted_left = builder.mul_const(F::TWO, value);
-        let mask = builder.constant(F::from_canonical_u32(0x80000000));
-        let msb = bitwise_and(builder, value, mask);
-        let divisor = builder.constant(F::from_canonical_u32(0x80000000));
-        let msb_to_lsb = builder.div(msb, divisor);
-        builder.add(shifted_left, msb_to_lsb)
+        let lower_32_mask = builder.constant(F::from_canonical_u32(0xFFFFFFFE)); // All bits except LSB
+        let shifted_masked = bitwise_and(builder, shifted_left, lower_32_mask);
+        
+        // Convert MSB to LSB: if MSB was set, add 1 to result
+        let zero = builder.zero();
+        let one = builder.one();
+        let msb_is_set = builder.is_equal(msb, msb_mask);
+        let lsb_value = builder.select(msb_is_set, one, zero);
+        
+        // Combine: (value << 1) | (MSB >> 31)
+        bitwise_xor(builder, shifted_masked, lsb_value)
     }
     
-    /// Helper: Rotate left by n bits (simplified for circuit)
+    /// Helper: Rotate left by n bits for 32-bit values
     fn rotate_left<F: RichField + Extendable<D>, const D: usize>(
         builder: &mut CircuitBuilder<F, D>,
         value: Target,
         n: usize,
     ) -> Target {
         if n == 0 { return value; }
-        if n >= 32 { return value; } // No rotation for large values in simplified circuit
+        if n >= 32 { return Self::rotate_left(builder, value, n % 32); }
         
-        let shift_left = 1u32 << n;
-        let shift_right = 1u32 << (32 - n);
-        let mask_high = ((1u32 << n) - 1) << (32 - n);
+        // For 32-bit values: (value << n) | (value >> (32 - n))
+        let shift_amount = n % 32;
+        if shift_amount == 0 { return value; }
         
-        let shifted_left = builder.mul_const(F::from_canonical_u32(shift_left), value);
-        let mask = builder.constant(F::from_canonical_u32(mask_high));
-        let high_bits = bitwise_and(builder, value, mask);
-        let divisor = builder.constant(F::from_canonical_u32(shift_right));
-        let high_to_low = builder.div(high_bits, divisor);
+        let right_shift_amount = (32 - shift_amount) % 32;
         
-        builder.add(shifted_left, high_to_low)
+        // Calculate masks and shift values
+        let left_shift_mult = 1u32 << shift_amount;
+        let high_bits_mask = if shift_amount < 32 {
+            ((1u64 << shift_amount) - 1) << (32 - shift_amount)
+        } else {
+            0
+        };
+        let low_bits_mask = (1u64 << (32 - shift_amount)) - 1;
+        
+        // Left shift: multiply by 2^n and mask to keep only lower bits
+        let shifted_left = builder.mul_const(F::from_canonical_u32(left_shift_mult), value);
+        let left_mask = builder.constant(F::from_canonical_u32(low_bits_mask as u32));
+        let left_part = bitwise_and(builder, shifted_left, left_mask);
+        
+        // Right shift: extract high bits and move them to low positions
+        let right_part = if right_shift_amount > 0 && right_shift_amount < 32 {
+            let high_mask = builder.constant(F::from_canonical_u32(high_bits_mask as u32));
+            let high_bits = bitwise_and(builder, value, high_mask);
+            let right_shift_div = 1u32 << right_shift_amount;
+            let divisor = builder.constant(F::from_canonical_u32(right_shift_div));
+            builder.div(high_bits, divisor)
+        } else {
+            builder.zero()
+        };
+        
+        // Combine left and right parts with OR (using XOR since they don't overlap)
+        bitwise_xor(builder, left_part, right_part)
+    }
+    
+    /// Helper: Rotate right by n bits for 32-bit values
+    fn rotate_right<F: RichField + Extendable<D>, const D: usize>(
+        builder: &mut CircuitBuilder<F, D>,
+        value: Target,
+        n: usize,
+    ) -> Target {
+        if n == 0 { return value; }
+        if n >= 32 { return Self::rotate_right(builder, value, n % 32); }
+        
+        // Right rotation by n is equivalent to left rotation by (32 - n)
+        let left_shift_amount = (32 - (n % 32)) % 32;
+        Self::rotate_left(builder, value, left_shift_amount)
     }
 }
 
@@ -221,6 +278,7 @@ mod tests {
     use plonky2::plonk::circuit_data::CircuitConfig;
     use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
     use plonky2::iop::witness::{PartialWitness, WitnessWrite};
+    use plonky2::field::types::PrimeField64;
 
     const D: usize = 2;
     type C = PoseidonGoldilocksConfig;
@@ -579,6 +637,342 @@ mod tests {
             
             let proof = circuit.prove(pw).expect("NIST deterministic test proof should succeed");
             circuit.verify(proof).expect("NIST deterministic test verification should succeed");
+        }
+    }
+
+    /// Range check verification tests for Keccak permutation
+    /// These tests verify that the 32-bit range checks correctly enforce input/output constraints
+
+    #[test]
+    fn test_keccak_range_checks_valid_32bit_inputs() {
+        let config = CircuitConfig::standard_recursion_config();
+        
+        // Test that valid 32-bit inputs work correctly
+        let valid_test_cases = [
+            // All zeros (minimum valid)
+            vec![0u32; 50],
+            // All ones 
+            vec![1u32; 50],
+            // Maximum valid 32-bit values
+            vec![0xFFFFFFFFu32; 50],
+            // Mixed valid values
+            (0..50).map(|i| (i as u32 * 7) & 0xFFFFFFFF).collect::<Vec<_>>(),
+            // Keccak constants (should all be 32-bit)
+            {
+                let mut values = vec![0u32; 50];
+                for i in 0..ROUND_CONSTANTS.len().min(50) {
+                    values[i] = ROUND_CONSTANTS[i];
+                }
+                values
+            }
+        ];
+        
+        for (test_idx, test_values) in valid_test_cases.iter().enumerate() {
+            let mut builder = CircuitBuilder::<F, D>::new(config.clone());
+            
+            // Create input targets
+            let mut input_targets = vec![];
+            for _ in 0..50 {
+                input_targets.push(builder.add_virtual_target());
+            }
+            
+            // Apply permutation (this includes range checks internally)
+            let mut state = input_targets.clone();
+            KeccakPermutationGadget::permute(&mut builder, &mut state);
+            
+            // Make inputs and outputs public for verification
+            for i in 0..50 {
+                builder.register_public_input(input_targets[i]);
+                builder.register_public_input(state[i]);
+            }
+            
+            let circuit = builder.build::<C>();
+            
+            let mut pw = PartialWitness::new();
+            for i in 0..50 {
+                pw.set_target(input_targets[i], F::from_canonical_u32(test_values[i]));
+            }
+            
+            // These should all succeed for valid 32-bit inputs
+            let proof = circuit.prove(pw).expect(&format!("proof should succeed for valid 32-bit inputs (test case {})", test_idx));
+            circuit.verify(proof.clone()).expect(&format!("verification should succeed for valid 32-bit inputs (test case {})", test_idx));
+            
+            // Verify outputs are in valid range (first 50 are inputs, next 50 are outputs)
+            for i in 50..100 {
+                let output_val = proof.public_inputs[i].to_canonical_u64();
+                assert!(output_val <= 0xFFFFFFFF, "Output {} should be in 32-bit range [0, 2^32-1]", output_val);
+            }
+        }
+    }
+
+    #[test]
+    fn test_keccak_range_checks_boundary_conditions() {
+        let config = CircuitConfig::standard_recursion_config();
+        
+        // Test exact boundary conditions for 32-bit values
+        let boundary_cases = [
+            // (description, input_value, should_succeed)
+            ("minimum valid", 0u64, true),
+            ("maximum valid 32-bit", 0xFFFFFFFFu64, true),
+        ];
+        
+        for (description, input_val, should_succeed) in boundary_cases.iter() {
+            let mut builder = CircuitBuilder::<F, D>::new(config.clone());
+            
+            // Create state with the test value in the first position
+            let mut input_targets = vec![];
+            for _ in 0..50 {
+                input_targets.push(builder.add_virtual_target());
+            }
+            
+            let mut state = input_targets.clone();
+            KeccakPermutationGadget::permute(&mut builder, &mut state);
+            
+            let circuit = builder.build::<C>();
+            
+            let mut pw = PartialWitness::new();
+            
+            // Set first input to test value, rest to zeros
+            pw.set_target(input_targets[0], F::from_canonical_u64(*input_val));
+            for i in 1..50 {
+                pw.set_target(input_targets[i], F::from_canonical_u32(0));
+            }
+            
+            let proof_result = circuit.prove(pw);
+            
+            if *should_succeed {
+                let proof = proof_result.expect(&format!("Should succeed for {} ({})", description, input_val));
+                circuit.verify(proof).expect(&format!("Verification should succeed for {} ({})", description, input_val));
+            } else {
+                assert!(proof_result.is_err(), "Should fail for {} ({}) due to range check", description, input_val);
+            }
+        }
+    }
+
+    #[test]
+    fn test_keccak_internal_range_checks() {
+        let config = CircuitConfig::standard_recursion_config();
+        
+        // Test that internal computations maintain 32-bit constraints
+        // This is important because Keccak operations can produce intermediate values > 32 bits
+        
+        let stress_test_cases = [
+            // Case 1: Values that might overflow during rotation
+            vec![0x80000000u32; 50], // MSB set - tests rotation edge cases
+            
+            // Case 2: Values that might overflow during XOR operations  
+            vec![0xFFFFFFFFu32; 50], // All bits set
+            
+            // Case 3: Mixed patterns that stress the chi (non-linear) step
+            {
+                let mut values = vec![0u32; 50];
+                for i in 0..50 {
+                    values[i] = if i % 3 == 0 { 0xAAAAAAAA } else if i % 3 == 1 { 0x55555555 } else { 0xFFFFFFFF };
+                }
+                values
+            },
+            
+            // Case 4: Sequential values that test arithmetic operations
+            (0..50).map(|i| (i as u32).wrapping_mul(0x12345678) & 0xFFFFFFFF).collect::<Vec<_>>(),
+        ];
+        
+        for (case_idx, test_values) in stress_test_cases.iter().enumerate() {
+            let mut builder = CircuitBuilder::<F, D>::new(config.clone());
+            
+            let mut input_targets = vec![];
+            for _ in 0..50 {
+                input_targets.push(builder.add_virtual_target());
+            }
+            
+            let mut state = input_targets.clone();
+            KeccakPermutationGadget::permute(&mut builder, &mut state);
+            
+            // Register all intermediate and final values as public to verify range compliance
+            for i in 0..50 {
+                builder.register_public_input(input_targets[i]);
+                builder.register_public_input(state[i]);
+            }
+            
+            let circuit = builder.build::<C>();
+            
+            let mut pw = PartialWitness::new();
+            for i in 0..50 {
+                pw.set_target(input_targets[i], F::from_canonical_u32(test_values[i]));
+            }
+            
+            let proof = circuit.prove(pw).expect(&format!("Internal range check stress test {} should succeed", case_idx));
+            let public_inputs = proof.public_inputs.clone();
+            circuit.verify(proof).expect(&format!("Internal range check stress test {} should verify", case_idx));
+            
+            // Verify all outputs are within 32-bit range
+            for i in 50..100 { // Outputs start at index 50
+                let output_val = public_inputs[i].to_canonical_u64();
+                assert!(output_val <= 0xFFFFFFFF, 
+                    "Stress test {} output {} should be in 32-bit range, got {}", 
+                    case_idx, i - 50, output_val);
+            }
+        }
+    }
+
+    #[test]
+    fn test_keccak_rotation_range_preservation() {
+        let config = CircuitConfig::standard_recursion_config();
+        
+        // Specifically test that rotation operations preserve 32-bit range
+        // This is critical since rotations are used extensively in Keccak
+        
+        let rotation_test_values = [
+            0x00000001u32, // Single bit set (LSB)
+            0x80000000u32, // Single bit set (MSB)  
+            0xFFFFFFFFu32, // All bits set
+            0x12345678u32, // Mixed pattern
+            0xFEDCBA98u32, // Reverse mixed pattern
+        ];
+        
+        for &test_val in &rotation_test_values {
+            let mut builder = CircuitBuilder::<F, D>::new(config.clone());
+            
+            // Create minimal state to test rotation specifically
+            let input = builder.add_virtual_target();
+            
+            // Test both rotation functions with various shift amounts
+            let rotated_left_1 = KeccakPermutationGadget::rotate_left_1(&mut builder, input);
+            let rotated_left_8 = KeccakPermutationGadget::rotate_left(&mut builder, input, 8);
+            let rotated_right_4 = KeccakPermutationGadget::rotate_right(&mut builder, input, 4);
+            
+            builder.register_public_input(input);
+            builder.register_public_input(rotated_left_1);
+            builder.register_public_input(rotated_left_8);
+            builder.register_public_input(rotated_right_4);
+            
+            let circuit = builder.build::<C>();
+            
+            let mut pw = PartialWitness::new();
+            pw.set_target(input, F::from_canonical_u32(test_val));
+            
+            let proof = circuit.prove(pw).expect(&format!("Rotation test should succeed for input {:#x}", test_val));
+            let public_inputs = proof.public_inputs.clone();
+            circuit.verify(proof).expect(&format!("Rotation test should verify for input {:#x}", test_val));
+            
+            // Verify all rotation outputs are in 32-bit range
+            for i in 1..4 { // Skip input at index 0, check outputs at 1, 2, 3
+                let output_val = public_inputs[i].to_canonical_u64();
+                assert!(output_val <= 0xFFFFFFFF, 
+                    "Rotation output {} should be in 32-bit range for input {:#x}, got {:#x}", 
+                    i, test_val, output_val);
+            }
+            
+            // Verify rotation correctness for specific known cases
+            let input_u64 = public_inputs[0].to_canonical_u64() as u32;
+            let left_1_result = public_inputs[1].to_canonical_u64() as u32;
+            let expected_left_1 = input_u64.rotate_left(1);
+            assert_eq!(left_1_result, expected_left_1, 
+                "Left rotate by 1 should match std::u32 rotate_left for input {:#x}", test_val);
+        }
+    }
+
+    #[test]
+    fn test_keccak_range_check_integration() {
+        let config = CircuitConfig::standard_recursion_config();
+        
+        // Integration test: Verify range checks work correctly across full permutation
+        // with various realistic input patterns
+        
+        let realistic_test_cases = [
+            // Case 1: Typical SHAKE256 state (partially filled)
+            {
+                let mut state = vec![0u32; 50];
+                // Simulate message absorption pattern
+                for i in 0..17 { // 136 bytes = 17 * 8 bytes (in 32-bit words, so 34 words)
+                    if i < 34 {
+                        state[i] = 0x01234567;
+                    }
+                }
+                state[33] ^= 0x1F; // SHAKE256 padding
+                state[49] ^= 0x80; // End padding
+                state
+            },
+            
+            // Case 2: Random-like but valid 32-bit values
+            {
+                let mut state = vec![0u32; 50];
+                for i in 0..50 {
+                    state[i] = ((i as u64 * 0x123456789ABCDEF) & 0xFFFFFFFF) as u32;
+                }
+                state
+            },
+            
+            // Case 3: Edge case with maximum 32-bit values in specific pattern
+            {
+                let mut state = vec![0u32; 50];
+                for i in 0..50 {
+                    state[i] = if i % 5 == 0 { 0xFFFFFFFF } else { i as u32 };
+                }
+                state
+            }
+        ];
+        
+        for (case_idx, initial_state) in realistic_test_cases.iter().enumerate() {
+            let mut builder = CircuitBuilder::<F, D>::new(config.clone());
+            
+            let mut input_targets = vec![];
+            for _ in 0..50 {
+                input_targets.push(builder.add_virtual_target());
+            }
+            
+            // Apply full permutation
+            let mut state = input_targets.clone();
+            KeccakPermutationGadget::permute(&mut builder, &mut state);
+            
+            // Verify determinism by applying permutation twice to same input
+            let mut state2 = input_targets.clone();
+            KeccakPermutationGadget::permute(&mut builder, &mut state2);
+            
+            // Both outputs should be identical
+            for i in 0..50 {
+                builder.connect(state[i], state2[i]);
+            }
+            
+            // Make everything public for verification
+            for i in 0..50 {
+                builder.register_public_input(input_targets[i]);
+                builder.register_public_input(state[i]);
+            }
+            
+            let circuit = builder.build::<C>();
+            
+            let mut pw = PartialWitness::new();
+            for i in 0..50 {
+                pw.set_target(input_targets[i], F::from_canonical_u32(initial_state[i]));
+            }
+            
+            let proof = circuit.prove(pw).expect(&format!("Integration test case {} should succeed", case_idx));
+            let public_inputs = proof.public_inputs.clone();
+            circuit.verify(proof).expect(&format!("Integration test case {} should verify", case_idx));
+            
+            // Verify all inputs were in valid range
+            for i in 0..50 {
+                let input_val = public_inputs[i].to_canonical_u64();
+                assert!(input_val <= 0xFFFFFFFF, 
+                    "Input {} should be in 32-bit range for case {}", i, case_idx);
+            }
+            
+            // Verify all outputs are in valid range
+            for i in 50..100 {
+                let output_val = public_inputs[i].to_canonical_u64();
+                assert!(output_val <= 0xFFFFFFFF, 
+                    "Output {} should be in 32-bit range for case {}", i - 50, case_idx);
+            }
+            
+            // Verify permutation actually changed the state (non-trivial operation)
+            let mut state_changed = false;
+            for i in 0..50 {
+                if public_inputs[i] != public_inputs[50 + i] {
+                    state_changed = true;
+                    break;
+                }
+            }
+            assert!(state_changed, "Keccak permutation should change state for case {}", case_idx);
         }
     }
 }

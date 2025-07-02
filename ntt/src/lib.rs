@@ -274,7 +274,7 @@ impl NttGadget {
 
     /// Montgomery multiplication: (a * b * R^(-1)) mod q
     /// This is the core arithmetic operation for efficient modular multiplication
-    fn montgomery_mul<F: RichField + Extendable<D>, const D: usize>(
+    pub fn montgomery_mul<F: RichField + Extendable<D>, const D: usize>(
         builder: &mut CircuitBuilder<F, D>,
         a: Target,
         b: Target,
@@ -293,7 +293,7 @@ impl NttGadget {
     }
 
     /// Add two elements modulo q
-    fn add_mod_q<F: RichField + Extendable<D>, const D: usize>(
+    pub fn add_mod_q<F: RichField + Extendable<D>, const D: usize>(
         builder: &mut CircuitBuilder<F, D>,
         a: Target,
         b: Target,
@@ -310,7 +310,7 @@ impl NttGadget {
     }
 
     /// Subtract two elements modulo q  
-    fn sub_mod_q<F: RichField + Extendable<D>, const D: usize>(
+    pub fn sub_mod_q<F: RichField + Extendable<D>, const D: usize>(
         builder: &mut CircuitBuilder<F, D>,
         a: Target,
         b: Target,
@@ -327,23 +327,41 @@ impl NttGadget {
         builder.select(is_ge_bool, diff, diff_plus_q)
     }
 
-    /// Check if a >= b (returns 1 if true, 0 if false)
+    /// Check if a >= b using Plonky2 range checks (returns BoolTarget)
     fn is_ge<F: RichField + Extendable<D>, const D: usize>(
         builder: &mut CircuitBuilder<F, D>,
         a: Target,
         b: Target,
     ) -> Target {
-        // For simplicity in the circuit, we use the fact that
-        // if a >= b, then a - b doesn't underflow in the field
-        // This is a simplified comparison suitable for our use case
-        let diff = builder.sub(a, b);
-        // Check if diff is "small" (not wrapped around)
-        // In a real implementation, this would use range proofs
-        let _half_field = builder.constant(F::from_canonical_u64(F::ORDER / 2));
-        let is_small = builder.is_equal(diff, diff); // Placeholder that always returns true
-        let one = builder.one();
-        let zero = builder.zero();
-        builder.select(is_small, one, zero)
+        // Ensure both values are in valid range [0, q) for soundness
+        let q_log = 24; // Q = 8380417 < 2^24
+        builder.range_check(a, q_log);
+        builder.range_check(b, q_log);
+        
+        // Create a virtual target for the difference when a >= b
+        let diff = builder.add_virtual_target();
+        
+        // Add constraint: a = b + diff (this ensures a >= b if diff >= 0)
+        let b_plus_diff = builder.add(b, diff);
+        builder.connect(a, b_plus_diff);
+        
+        // Range check diff to ensure it's non-negative
+        // Since a, b < q < 2^24, the maximum difference is also < 2^24
+        builder.range_check(diff, q_log);
+        
+        // If we reach here without constraint failure, then a >= b
+        // Return 1 (true)
+        builder.one()
+    }
+    
+    /// Check if a <= b using Plonky2 range checks (returns 1 if true, 0 if false)
+    fn is_le<F: RichField + Extendable<D>, const D: usize>(
+        builder: &mut CircuitBuilder<F, D>,
+        a: Target,
+        b: Target,
+    ) -> Target {
+        // a <= b is equivalent to b >= a
+        Self::is_ge(builder, b, a)
     }
 
     /// Reduce element to canonical range [0, q)

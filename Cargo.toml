@@ -2,9 +2,10 @@
 members = [
     "bit-operations",
     "keccak-permutation",
-    "shake256",
-    "ntt", 
+    "shake256", 
+    "ntt",
     "mldsa",
+    "tests",
 ]
 resolver = "2"
 
