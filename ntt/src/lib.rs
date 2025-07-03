@@ -354,13 +354,11 @@ impl NttGadget {
         builder.one()
     }
     
-    /// Check if a <= b using Plonky2 range checks (returns 1 if true, 0 if false)
     fn is_le<F: RichField + Extendable<D>, const D: usize>(
         builder: &mut CircuitBuilder<F, D>,
         a: Target,
         b: Target,
     ) -> Target {
-        // a <= b is equivalent to b >= a
         Self::is_ge(builder, b, a)
     }
 

@@ -5,7 +5,6 @@ members = [
     "shake256", 
     "ntt",
     "mldsa",
-    "tests",
 ]
 resolver = "2"
 

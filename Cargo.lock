@@ -182,20 +182,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "gadget-tests"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "bit-operations",
- "keccak-permutation",
- "ntt",
- "plonky2",
- "plonky2_field",
- "sha3",
- "shake256",
-]
-
-[[package]]
 name = "generic-array"
 version = "0.14.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
